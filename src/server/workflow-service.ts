@@ -720,6 +720,7 @@ export async function openWorkflowService(
       let activeOperationIdentifiers: {
         requestId: string | null;
         responseId: string | null;
+        usage: TokenUsage;
       } | null = null;
 
       try {
@@ -756,7 +757,9 @@ export async function openWorkflowService(
           activeOperationIdentifiers = {
             requestId: generated.requestId,
             responseId: generated.responseId,
+            usage: generated.usage,
           };
+          totalUsage = addUsage(totalUsage, generated.usage);
           const dimensions = validateConceptScreenPng(generated.png);
           if (first && (
             dimensions.width !== first.width || dimensions.height !== first.height
@@ -807,7 +810,6 @@ export async function openWorkflowService(
             database.exec('ROLLBACK;');
             throw error;
           }
-          totalUsage = addUsage(totalUsage, generated.usage);
           completed.push({ ordinal, assetId, png: generated.png, ...dimensions });
           activeOperationIdentifiers = null;
         }
@@ -877,6 +879,7 @@ export async function openWorkflowService(
               duration_ms = MAX(0, unixepoch(?) * 1000 - unixepoch(started_at) * 1000),
               request_id = COALESCE(?, request_id),
               response_id = COALESCE(?, response_id),
+              usage_json = COALESCE(?, usage_json),
               error_code = ?, error_message = ?
           WHERE run_id = ? AND status = 'running'
         `).run(
@@ -884,6 +887,9 @@ export async function openWorkflowService(
           completedAt.toISOString(),
           boundaryError?.requestId ?? activeOperationIdentifiers?.requestId ?? null,
           boundaryError?.responseId ?? activeOperationIdentifiers?.responseId ?? null,
+          activeOperationIdentifiers
+            ? JSON.stringify(activeOperationIdentifiers.usage)
+            : null,
           code,
           message,
           runId,

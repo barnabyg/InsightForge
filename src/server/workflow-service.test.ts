@@ -453,9 +453,11 @@ describe('Workflow service', () => {
             ordinal: 2,
             status: 'failed',
             requestId: 'req_validation_2',
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
             error: { code: 'invalid_artifact' },
           },
         ],
+        usage: { inputTokens: 200, outputTokens: 400, totalTokens: 600 },
       },
     });
   });
