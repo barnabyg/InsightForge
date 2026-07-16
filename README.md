@@ -1,0 +1,43 @@
+# InsightForge
+
+InsightForge is a local workflow application for turning a product insight into a Design Brief, three Concept Screens, and a PRD. Generated artifacts are read-only; iteration happens by improving the shared prompts and rerunning a consistent workflow.
+
+The product definition is in [the MVP specification](.scratch/insightforge-mvp/spec.md), and implementation work is tracked in [the local ticket map](.scratch/insightforge-mvp/map.md).
+
+## Development
+
+InsightForge currently requires Node.js 24 or later because its local persistence layer uses the built-in SQLite module.
+
+```powershell
+npm install
+npm run dev
+```
+
+The browser client is available at `http://127.0.0.1:5173`. Its API is served on `http://127.0.0.1:4317`. Both development servers bind only to loopback.
+
+For live connectivity, provide an OpenAI API key to the server process:
+
+```powershell
+$env:OPENAI_API_KEY='your-key'
+npm run dev
+```
+
+For deterministic local development without OpenAI calls:
+
+```powershell
+$env:INSIGHTFORGE_OPENAI_MODE='mock'
+npm run dev
+```
+
+Mock mode is always labelled in the interface. The application does not use accounts or cookies, and never returns the API key to the browser.
+
+By default, application data is stored in the current user's operating-system application-data directory. Tests and isolated development sessions can set `INSIGHTFORGE_DATA_DIR` to override that location.
+
+## Verification
+
+```powershell
+npm test
+npm run typecheck
+npm run build
+```
+
