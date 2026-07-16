@@ -127,6 +127,14 @@ export async function initializeStorage(
         PRIMARY KEY (project_id, stage_id)
       );
 
+      CREATE TABLE IF NOT EXISTS pending_cascades (
+        project_id TEXT PRIMARY KEY
+          REFERENCES projects(id) ON DELETE CASCADE,
+        design_brief_artifact_id TEXT NOT NULL
+          REFERENCES artifacts(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS binary_assets (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL

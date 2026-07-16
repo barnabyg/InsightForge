@@ -377,12 +377,6 @@ export async function openWorkflowService(
     string,
     Set<(event: ConceptScreenProgressEvent) => void>
   >();
-  const pendingDesignBriefCandidates = new Map<string, {
-    id: string;
-    run_id: string;
-    markdown: string;
-  }>();
-
   function emitConceptProgress(event: ConceptScreenProgressEvent): void {
     for (const listener of conceptProgressListeners.get(event.projectId) ?? []) {
       try {
@@ -436,6 +430,23 @@ export async function openWorkflowService(
       WHERE operation.run_id = ?
       ORDER BY operation.ordinal
     `).all(runId) as unknown as ConceptOperationRow[];
+  }
+
+  function pendingDesignBriefCandidate(projectId: string): {
+    id: string;
+    run_id: string;
+    markdown: string;
+  } | undefined {
+    return database.prepare(`
+      SELECT artifact.id, artifact.run_id, artifact.markdown
+      FROM pending_cascades AS pending
+      JOIN artifacts AS artifact ON artifact.id = pending.design_brief_artifact_id
+      WHERE pending.project_id = ?
+    `).get(projectId) as unknown as {
+      id: string;
+      run_id: string;
+      markdown: string;
+    } | undefined;
   }
 
   function readProjectWorkflow(projectId: string): ProjectWorkflow {
@@ -639,16 +650,15 @@ export async function openWorkflowService(
 
       if (!requiresDownstreamCascade) return readProjectWorkflow(projectId);
 
-      pendingDesignBriefCandidates.set(projectId, {
-        id: artifactId,
-        run_id: runId,
-        markdown: generated.markdown.trim(),
-      });
-      try {
-        return await service.generateConceptScreens(projectId);
-      } finally {
-        pendingDesignBriefCandidates.delete(projectId);
-      }
+      database.prepare(`
+        INSERT INTO pending_cascades (
+          project_id, design_brief_artifact_id, created_at
+        ) VALUES (?, ?, ?)
+        ON CONFLICT(project_id) DO UPDATE SET
+          design_brief_artifact_id = excluded.design_brief_artifact_id,
+          created_at = excluded.created_at
+      `).run(projectId, artifactId, completedAt.toISOString());
+      return service.generateConceptScreens(projectId);
     },
 
     getConceptScreenAsset(projectId, assetId) {
@@ -669,7 +679,7 @@ export async function openWorkflowService(
           'Concept Screen generation is already running for this Project.',
         );
       }
-      const designBrief = pendingDesignBriefCandidates.get(projectId)
+      const designBrief = pendingDesignBriefCandidate(projectId)
         ?? database.prepare(`
         SELECT artifact.id, artifact.run_id, artifact.markdown
         FROM current_artifacts AS current
@@ -958,7 +968,7 @@ export async function openWorkflowService(
             ON CONFLICT(project_id, stage_id) DO UPDATE SET
               artifact_id = excluded.artifact_id
           `).run(projectId, artifactId);
-          const designBriefCandidate = pendingDesignBriefCandidates.get(projectId);
+          const designBriefCandidate = pendingDesignBriefCandidate(projectId);
           if (designBriefCandidate) {
             database.prepare(`
               INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
@@ -966,6 +976,8 @@ export async function openWorkflowService(
               ON CONFLICT(project_id, stage_id) DO UPDATE SET
                 artifact_id = excluded.artifact_id
             `).run(projectId, designBriefCandidate.id);
+            database.prepare('DELETE FROM pending_cascades WHERE project_id = ?')
+              .run(projectId);
           }
           database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
             .run(completedAt.toISOString(), projectId);

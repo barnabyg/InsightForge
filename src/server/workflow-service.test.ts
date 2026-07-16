@@ -380,6 +380,94 @@ describe('Workflow service', () => {
     expect(resumed.conceptScreenSet?.screens).toHaveLength(3);
   });
 
+  it('persists a failed cascade candidate and resumes its exact lineage after restart', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({ insightSource: 'A cascade must remain coherent across restart.' });
+    const pngs = [pngFixture(35), pngFixture(65), pngFixture(95)];
+    let briefVersion = 0;
+    let screenTwoAttempts = 0;
+    const firstCalls: number[] = [];
+    const firstWorkflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          briefVersion += 1;
+          return {
+            markdown: `# Design Brief\n\nVersion ${briefVersion}`,
+            responseId: `resp_brief_${briefVersion}`,
+            requestId: `req_brief_${briefVersion}`,
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          firstCalls.push(input.ordinal);
+          if (input.ordinal === 2 && screenTwoAttempts++ === 1) {
+            throw new GenerationBoundaryError(
+              'openai_request_failed',
+              'Cascade screen two failed safely.',
+              { requestId: 'req_cascade_screen_2_failed' },
+            );
+          }
+          return {
+            png: pngs[input.ordinal - 1],
+            requestId: `req_cascade_${briefVersion}_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(firstWorkflows);
+    await firstWorkflows.generateDesignBrief(project.id);
+    const original = await firstWorkflows.generateConceptScreens(project.id);
+
+    await expect(firstWorkflows.generateDesignBrief(project.id)).rejects.toMatchObject({
+      code: 'openai_request_failed',
+    });
+    const failed = firstWorkflows.getProjectWorkflow(project.id);
+    expect(failed.designBrief?.id).toBe(original.designBrief?.id);
+    expect(failed.conceptScreenSet?.id).toBe(original.conceptScreenSet?.id);
+    const candidateLineage = failed.lastConceptScreenRun!.stageInput;
+    expect(candidateLineage.artifactId).not.toBe(original.designBrief?.id);
+    expect(firstCalls).toEqual([1, 2, 3, 1, 2]);
+
+    firstWorkflows.close();
+    workflowServices.splice(workflowServices.indexOf(firstWorkflows), 1);
+    const resumedCalls: number[] = [];
+    const resumedWorkflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          throw new Error('Design Brief regeneration was not expected during resume.');
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          resumedCalls.push(input.ordinal);
+          return {
+            png: pngs[input.ordinal - 1],
+            requestId: `req_resumed_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(resumedWorkflows);
+
+    const resumed = await resumedWorkflows.generateConceptScreens(project.id);
+    expect(resumedCalls).toEqual([2, 3]);
+    expect(resumed.designBrief).toMatchObject({
+      id: candidateLineage.artifactId,
+      runId: candidateLineage.runId,
+    });
+    expect(resumed.lastConceptScreenRun?.id).toBe(failed.lastConceptScreenRun?.id);
+    expect(resumed.lastConceptScreenRun?.stageInput).toEqual(candidateLineage);
+  });
+
   it('cancels before the next image operation and resumes the completed candidate', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);
