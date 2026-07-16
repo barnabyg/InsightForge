@@ -374,6 +374,11 @@ export async function openWorkflowService(
     string,
     Set<(event: ConceptScreenProgressEvent) => void>
   >();
+  const pendingDesignBriefCandidates = new Map<string, {
+    id: string;
+    run_id: string;
+    markdown: string;
+  }>();
 
   function emitConceptProgress(event: ConceptScreenProgressEvent): void {
     for (const listener of conceptProgressListeners.get(event.projectId) ?? []) {
@@ -499,7 +504,7 @@ export async function openWorkflowService(
     };
   }
 
-  return {
+  const service: WorkflowService = {
     getProjectWorkflow(projectId) {
       return readProjectWorkflow(projectId);
     },
@@ -512,6 +517,11 @@ export async function openWorkflowService(
         );
       }
       const configuration = designBriefConfiguration();
+      const requiresDownstreamCascade = Boolean(database.prepare(`
+        SELECT 1
+        FROM current_artifacts
+        WHERE project_id = ? AND stage_id = 'concept_screens'
+      `).get(projectId));
       const runId = randomUUID();
       const startedAt = now();
       const assembledRequest = [
@@ -608,21 +618,34 @@ export async function openWorkflowService(
           completedAt.toISOString(),
           JSON.stringify(validation),
         );
-        database.prepare(`
-          INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
-          VALUES (?, 'design_brief', ?)
-          ON CONFLICT(project_id, stage_id) DO UPDATE SET
-            artifact_id = excluded.artifact_id
-        `).run(projectId, artifactId);
-        database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
-          .run(completedAt.toISOString(), projectId);
+        if (!requiresDownstreamCascade) {
+          database.prepare(`
+            INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
+            VALUES (?, 'design_brief', ?)
+            ON CONFLICT(project_id, stage_id) DO UPDATE SET
+              artifact_id = excluded.artifact_id
+          `).run(projectId, artifactId);
+          database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
+            .run(completedAt.toISOString(), projectId);
+        }
         database.exec('COMMIT;');
       } catch (error) {
         database.exec('ROLLBACK;');
         throw error;
       }
 
-      return readProjectWorkflow(projectId);
+      if (!requiresDownstreamCascade) return readProjectWorkflow(projectId);
+
+      pendingDesignBriefCandidates.set(projectId, {
+        id: artifactId,
+        run_id: runId,
+        markdown: generated.markdown.trim(),
+      });
+      try {
+        return await service.generateConceptScreens(projectId);
+      } finally {
+        pendingDesignBriefCandidates.delete(projectId);
+      }
     },
 
     getConceptScreenAsset(projectId, assetId) {
@@ -643,7 +666,8 @@ export async function openWorkflowService(
           'Concept Screen generation is already running for this Project.',
         );
       }
-      const designBrief = database.prepare(`
+      const designBrief = pendingDesignBriefCandidates.get(projectId)
+        ?? database.prepare(`
         SELECT artifact.id, artifact.run_id, artifact.markdown
         FROM current_artifacts AS current
         JOIN artifacts AS artifact ON artifact.id = current.artifact_id
@@ -916,6 +940,15 @@ export async function openWorkflowService(
             ON CONFLICT(project_id, stage_id) DO UPDATE SET
               artifact_id = excluded.artifact_id
           `).run(projectId, artifactId);
+          const designBriefCandidate = pendingDesignBriefCandidates.get(projectId);
+          if (designBriefCandidate) {
+            database.prepare(`
+              INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
+              VALUES (?, 'design_brief', ?)
+              ON CONFLICT(project_id, stage_id) DO UPDATE SET
+                artifact_id = excluded.artifact_id
+            `).run(projectId, designBriefCandidate.id);
+          }
           database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
             .run(completedAt.toISOString(), projectId);
           database.exec('COMMIT;');
@@ -1026,4 +1059,5 @@ export async function openWorkflowService(
       database.close();
     },
   };
+  return service;
 }

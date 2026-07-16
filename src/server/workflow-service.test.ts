@@ -283,6 +283,15 @@ describe('Workflow service', () => {
       expect(workflows.getConceptScreenAsset(project.id, screen.assetId))
         .toEqual(generatedPngs[screen.ordinal - 1]);
     }
+
+    const cascaded = await workflows.generateDesignBrief(project.id);
+    expect(imageInputs).toHaveLength(6);
+    expect(cascaded.designBrief?.runId).not.toBe(generated.designBrief?.runId);
+    expect(cascaded.conceptScreenSet?.runId).not.toBe(generated.conceptScreenSet?.runId);
+    expect(cascaded.lastConceptScreenRun?.stageInput).toMatchObject({
+      artifactId: cascaded.designBrief?.id,
+      runId: cascaded.designBrief?.runId,
+    });
   });
 
   it('resumes a failed Concept Screen Set without regenerating completed screens', async () => {
