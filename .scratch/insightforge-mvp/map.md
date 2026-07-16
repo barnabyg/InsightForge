@@ -6,7 +6,7 @@ The frontier is the lowest-numbered unblocked ticket. Only one ticket is claimed
 
 | Ticket | Outcome | Status |
 | --- | --- | --- |
-| [01](issues/01-launch-secure-local-shell.md) | Secure local shell | claimed |
+| [01](issues/01-launch-secure-local-shell.md) | Secure local shell | [resolved](issues/01-launch-secure-local-shell.md#answer) |
 | [02](issues/02-manage-projects-and-insights.md) | Projects and Insight Sources | ready-for-agent |
 | [03](issues/03-configure-shared-workflow.md) | Shared workflow configuration | ready-for-agent |
 | [04](issues/04-generate-design-brief.md) | Design Brief generation | ready-for-agent |
@@ -20,4 +20,3 @@ The frontier is the lowest-numbered unblocked ticket. Only one ticket is claimed
 | [12](issues/12-export-project-backup.md) | Project backup export | ready-for-agent |
 | [13](issues/13-import-project-backup.md) | Transactional Project import | ready-for-agent |
 | [14](issues/14-protect-local-storage-and-offline-use.md) | Storage and offline hardening | ready-for-agent |
-

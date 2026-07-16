@@ -9,7 +9,7 @@
   --paper: #f3efe7;
   --paper-light: #faf8f3;
   --line: #d9d2c5;
-  --accent: #c85536;
+  --accent: #4257a8;
   --green: #39745b;
   --amber: #a56822;
   --red: #a8463b;
@@ -46,9 +46,7 @@ a {
 
 .app-frame {
   min-height: 100vh;
-  background:
-    radial-gradient(circle at 83% 8%, rgb(200 85 54 / 7%), transparent 24rem),
-    var(--paper);
+  background: var(--paper);
 }
 
 .topbar {
@@ -88,14 +86,15 @@ a {
 
 .mode-badge {
   padding: 6px 10px;
-  border: 1px solid #8f654a;
+  border: 1px solid #7d86b7;
   border-radius: 999px;
-  color: #70452d;
-  background: #f4e6da;
+  color: #35478e;
+  background: #e7e9f5;
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.04em;
   text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .connectivity {
@@ -127,6 +126,22 @@ a {
 .connectivity--unavailable .connectivity-dot {
   background: var(--red);
   box-shadow: 0 0 0 3px rgb(168 70 59 / 14%);
+}
+
+.last-check {
+  padding-left: 12px;
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.last-check time {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
 
 .workspace {
@@ -318,7 +333,7 @@ a {
   place-items: center;
   border-radius: 50%;
   color: var(--accent);
-  background: #eee4d8;
+  background: #e5e7f1;
   font-size: 20px;
 }
 
@@ -348,6 +363,14 @@ a {
   .mode-badge {
     padding: 5px 8px;
     font-size: 10px;
+  }
+
+  .environment {
+    gap: 8px;
+  }
+
+  .last-check {
+    padding-left: 8px;
   }
 
   .workspace {

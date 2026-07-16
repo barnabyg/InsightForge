@@ -6,7 +6,6 @@ import { DatabaseSync } from 'node:sqlite';
 export interface StorageState {
   state: 'ready';
 }
-
 export function defaultDataDirectory(environment = process.env): string {
   if (environment.INSIGHTFORGE_DATA_DIR) {
     return environment.INSIGHTFORGE_DATA_DIR;
@@ -53,4 +52,3 @@ export async function initializeStorage(
 
   return { state: 'ready' };
 }
-

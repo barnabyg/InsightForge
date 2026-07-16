@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -6,6 +6,12 @@ import { buildApp } from './app.js';
 
 describe('local application bootstrap', () => {
   const temporaryDirectories: string[] = [];
+
+  async function createTemporaryDataDirectory(): Promise<string> {
+    const directory = await mkdtemp(join(tmpdir(), 'insightforge-test-'));
+    temporaryDirectories.push(directory);
+    return directory;
+  }
 
   afterEach(async () => {
     await Promise.all(
@@ -16,8 +22,7 @@ describe('local application bootstrap', () => {
   });
 
   it('initializes local storage, reports safe mock connectivity, and rejects remote browser requests', async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-test-'));
-    temporaryDirectories.push(dataDirectory);
+    const dataDirectory = await createTemporaryDataDirectory();
 
     const app = await buildApp({
       dataDirectory,
@@ -65,8 +70,7 @@ describe('local application bootstrap', () => {
   });
 
   it('loads without an API key and reports generation as unavailable', async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-test-'));
-    temporaryDirectories.push(dataDirectory);
+    const dataDirectory = await createTemporaryDataDirectory();
 
     const app = await buildApp({
       dataDirectory,
@@ -87,6 +91,101 @@ describe('local application bootstrap', () => {
       message: 'Set OPENAI_API_KEY to enable generation',
     });
     expect(response.headers['set-cookie']).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('starts on a real loopback listener while a live connectivity check runs in the background', async () => {
+    const dataDirectory = await createTemporaryDataDirectory();
+
+    const appResult = await Promise.race([
+      buildApp({
+        dataDirectory,
+        mode: 'live',
+        apiKey: 'test-key',
+        checkOpenAI: () => new Promise(() => undefined),
+      }),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 25)),
+    ]);
+
+    expect(appResult).not.toBeNull();
+    const app = appResult!;
+    const address = await app.listen({ host: '127.0.0.1', port: 0 });
+    const response = await fetch(`${address}/api/bootstrap`);
+
+    expect(address).toMatch(/^http:\/\/127\.0\.0\.1:/);
+    expect(response.status).toBe(200);
+    expect((await response.json() as { connectivity: { state: string } }).connectivity.state)
+      .toBe('checking');
+
+    await app.close();
+  });
+
+  it('serves the built browser shell from Fastify', async () => {
+    const dataDirectory = await createTemporaryDataDirectory();
+    const webRoot = join(dataDirectory, 'web');
+    await mkdir(webRoot);
+    await writeFile(join(webRoot, 'index.html'), '<h1>Built InsightForge</h1>');
+    await writeFile(join(dataDirectory, 'secret.txt'), 'must not be served');
+
+    const app = await buildApp({ dataDirectory, mode: 'mock', webRoot });
+    const response = await app.inject({
+      method: 'GET',
+      url: '/',
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.body).toContain('Built InsightForge');
+    expect(response.headers['content-type']).toContain('text/html');
+
+    const traversal = await app.inject({
+      method: 'GET',
+      url: '/assets/%2e%2e%2fsecret.txt',
+      headers: { host: 'localhost:4317' },
+    });
+    expect(traversal.statusCode).toBe(404);
+    expect(traversal.body).not.toContain('must not be served');
+
+    await app.close();
+  });
+
+  it('lets the browser await the one startup connectivity result without polling', async () => {
+    const dataDirectory = await createTemporaryDataDirectory();
+    let completeProbe: ((state: {
+      state: 'connected';
+      checkedAt: string;
+      message: string;
+    }) => void) | undefined;
+
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'live',
+      apiKey: 'test-key',
+      checkOpenAI: () => new Promise((resolve) => {
+        completeProbe = resolve;
+      }),
+    });
+    await app.ready();
+
+    const resultRequest = app.inject({
+      method: 'GET',
+      url: '/api/connectivity',
+      headers: { host: 'localhost:4317' },
+    });
+    completeProbe?.({
+      state: 'connected',
+      checkedAt: '2026-07-16T10:50:00.000Z',
+      message: 'OpenAI is reachable',
+    });
+    const result = await resultRequest;
+
+    expect(result.statusCode).toBe(200);
+    expect(result.json()).toEqual({
+      state: 'connected',
+      checkedAt: '2026-07-16T10:50:00.000Z',
+      message: 'OpenAI is reachable',
+    });
 
     await app.close();
   });

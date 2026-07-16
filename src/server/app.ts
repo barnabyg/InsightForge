@@ -1,40 +1,27 @@
+import { stat } from 'node:fs/promises';
+import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
-import {
-  checkConnectivity,
-  type ApplicationMode,
-  type ConnectivityState,
-} from './connectivity.js';
+import type { CompletedConnectivityState } from './connectivity.js';
+import { registerBootstrapRoutes } from './bootstrap-routes.js';
+import { createConnectivityMonitor } from './connectivity-monitor.js';
+import { registerLocalAccess } from './local-access.js';
 import { defaultDataDirectory, initializeStorage } from './storage.js';
+import { registerWebShell } from './web-shell.js';
+import type { ApplicationMode } from '../shared/bootstrap.js';
 
 export interface BuildAppOptions {
   dataDirectory?: string;
   mode?: ApplicationMode;
   apiKey?: string;
   now?: () => Date;
-  checkOpenAI?: () => Promise<ConnectivityState>;
+  checkOpenAI?: () => Promise<CompletedConnectivityState>;
+  webRoot?: string;
   logger?: boolean;
 }
 
-function isLocalHost(host: string | undefined): boolean {
-  if (!host) {
-    return false;
-  }
-
-  return /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)
-    || /^\[::1\](?::\d+)?$/i.test(host);
-}
-
-function isLocalOrigin(origin: string | undefined): boolean {
-  if (!origin) {
-    return true;
-  }
-
+async function isDirectory(path: string): Promise<boolean> {
   try {
-    const url = new URL(origin);
-    return url.protocol === 'http:'
-      && (url.hostname === 'localhost'
-        || url.hostname === '127.0.0.1'
-        || url.hostname === '[::1]');
+    return (await stat(path)).isDirectory();
   } catch {
     return false;
   }
@@ -50,34 +37,26 @@ export async function buildApp(
     process.env.INSIGHTFORGE_OPENAI_MODE === 'mock' ? 'mock' : 'live'
   );
   const now = options.now ?? (() => new Date());
+  const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
   const storage = await initializeStorage(
     options.dataDirectory ?? defaultDataDirectory(),
   );
-  const connectivity = options.checkOpenAI
-    ? await options.checkOpenAI()
-    : await checkConnectivity({
-        mode,
-        apiKey: options.apiKey ?? process.env.OPENAI_API_KEY,
-        now,
-      });
+  const connectivity = createConnectivityMonitor(
+    { mode, apiKey, now },
+    options.checkOpenAI,
+  );
 
-  app.addHook('onRequest', async (request, reply) => {
-    if (!isLocalHost(request.headers.host) || !isLocalOrigin(request.headers.origin)) {
-      await reply.code(403).send({
-        error: {
-          code: 'local_access_only',
-          message: 'InsightForge accepts requests only from this computer',
-        },
-      });
-    }
+  app.addHook('onReady', () => {
+    connectivity.start();
   });
 
-  app.get('/api/bootstrap', async () => ({
-    app: { name: 'InsightForge', version: '0.1.0' },
-    mode,
-    connectivity,
-    storage,
-  }));
+  registerLocalAccess(app);
+  registerBootstrapRoutes(app, { mode, storage, connectivity });
+
+  const webRoot = options.webRoot ?? join(process.cwd(), 'dist');
+  if (await isDirectory(webRoot)) {
+    registerWebShell(app, webRoot);
+  }
 
   return app;
 }

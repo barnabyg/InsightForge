@@ -15,6 +15,12 @@ npm run dev
 
 The browser client is available at `http://127.0.0.1:5173`. Its API is served on `http://127.0.0.1:4317`. Both development servers bind only to loopback.
 
+To build the browser client and serve the complete production application from Fastify at `http://127.0.0.1:4317`:
+
+```powershell
+npm run serve
+```
+
 For live connectivity, provide an OpenAI API key to the server process:
 
 ```powershell
@@ -40,4 +46,3 @@ npm test
 npm run typecheck
 npm run build
 ```
-

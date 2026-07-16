@@ -11,6 +11,7 @@
     "dev:server": "tsx watch src/server/main.ts",
     "dev:client": "vite",
     "start": "tsx src/server/main.ts",
+    "serve": "npm run build && npm start",
     "test": "vitest run",
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
