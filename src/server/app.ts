@@ -4,11 +4,14 @@ import Fastify, { type FastifyInstance } from 'fastify';
 import type { CompletedConnectivityState } from './connectivity.js';
 import type { CompatibleModels } from './model-discovery.js';
 import type { TextGenerationBoundary } from '../shared/generation.js';
+import type { ImageGenerationBoundary } from './image-generation-boundary.js';
 import { registerBootstrapRoutes } from './bootstrap-routes.js';
 import { createConnectivityMonitor } from './connectivity-monitor.js';
 import { registerLocalAccess } from './local-access.js';
 import { openModelCatalogService } from './model-catalog-service.js';
 import { createMockTextGeneration } from './mock-text-generation.js';
+import { createMockImageGeneration } from './mock-image-generation.js';
+import { createOpenAIImageGeneration } from './openai-image-generation.js';
 import { createOpenAITextGeneration } from './openai-text-generation.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 import { openProjectService } from './project-service.js';
@@ -32,6 +35,7 @@ export interface BuildAppOptions {
   checkOpenAI?: () => Promise<CompletedConnectivityState>;
   discoverModels?: () => Promise<CompatibleModels>;
   textGeneration?: TextGenerationBoundary;
+  imageGeneration?: ImageGenerationBoundary;
   webRoot?: string;
   logger?: boolean;
 }
@@ -86,6 +90,19 @@ export async function buildApp(
   const workflowService = await openWorkflowService(dataDirectory, {
     now,
     textGeneration,
+    imageGeneration: options.imageGeneration
+      ?? (mode === 'mock'
+        ? createMockImageGeneration({ delayMs: 250 })
+        : apiKey
+          ? createOpenAIImageGeneration(apiKey)
+          : {
+              async generateConceptScreen() {
+                throw new GenerationBoundaryError(
+                  'api_key_missing',
+                  'Set OPENAI_API_KEY to enable generation.',
+                );
+              },
+            }),
   });
   const storage = { state: 'ready' as const };
   const connectivity = createConnectivityMonitor(

@@ -63,4 +63,49 @@ export function registerWorkflowRoutes(
       }
     },
   );
+
+  app.post<{ Params: ProjectParameters }>(
+    '/api/projects/:id/concept-screen-runs',
+    async (request, reply) => {
+      try {
+        await options.beforeGeneration?.();
+        const workflow = await workflows.generateConceptScreens(request.params.id);
+        return reply.status(201).send(workflow);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.delete<{ Params: ProjectParameters }>(
+    '/api/projects/:id/concept-screen-runs/active',
+    async (request, reply) => {
+      try {
+        const cancelled = workflows.cancelConceptScreens(request.params.id);
+        return cancelled
+          ? reply.status(202).send({ state: 'cancelling' })
+          : reply.status(409).send({
+              code: 'no_active_generation',
+              error: 'No Concept Screen generation is active.',
+            });
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.get<{ Params: ProjectParameters & { assetId: string } }>(
+    '/api/projects/:id/concept-screen-assets/:assetId',
+    async (request, reply) => {
+      try {
+        const bytes = workflows.getConceptScreenAsset(
+          request.params.id,
+          request.params.assetId,
+        );
+        return reply.type('image/png').send(bytes);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
 }

@@ -47,6 +47,7 @@ describe('Project service', () => {
         updatedAt: '2026-07-16T12:00:00.000Z',
         insightSourcePresent: true,
         designBriefPresent: false,
+        conceptScreenSetPresent: false,
       },
     ]);
   });

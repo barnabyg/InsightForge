@@ -1926,6 +1926,174 @@ a {
   line-height: 1.55;
 }
 
+.concept-gallery {
+  border: 1px solid #bfb8ab;
+  background: #fffefa;
+  box-shadow: 0 14px 36px rgb(54 49 40 / 6%);
+}
+
+.concept-gallery-heading {
+  min-height: 84px;
+  padding: 17px 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  border-bottom: 1px solid var(--line);
+  background: #f8f5ee;
+}
+
+.concept-gallery-heading h2 {
+  margin: 10px 0 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 24px;
+  font-weight: 400;
+}
+
+.concept-gallery-heading > span {
+  color: var(--muted);
+  font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace;
+  font-size: 10px;
+  white-space: nowrap;
+}
+
+.concept-grid {
+  padding: 18px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.concept-card {
+  min-width: 0;
+  margin: 0;
+  border: 1px solid var(--line);
+  background: #f8f5ee;
+}
+
+.concept-image-button {
+  position: relative;
+  width: 100%;
+  padding: 0;
+  display: block;
+  overflow: hidden;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #ede9df;
+  cursor: zoom-in;
+}
+
+.concept-image-button img {
+  width: 100%;
+  height: auto;
+  display: block;
+  transition: transform 180ms ease;
+}
+
+.concept-image-button > span {
+  position: absolute;
+  right: 9px;
+  bottom: 9px;
+  padding: 6px 8px;
+  color: #fff;
+  background: rgb(31 35 53 / 86%);
+  font-size: 9px;
+  opacity: 0;
+  transition: opacity 160ms ease;
+}
+
+.concept-image-button:hover img,
+.concept-image-button:focus-visible img {
+  transform: scale(1.018);
+}
+
+.concept-image-button:hover > span,
+.concept-image-button:focus-visible > span {
+  opacity: 1;
+}
+
+.concept-card figcaption {
+  min-height: 78px;
+  padding: 12px;
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.concept-card figcaption strong,
+.concept-card figcaption span {
+  display: block;
+}
+
+.concept-card figcaption strong {
+  margin-bottom: 5px;
+  font-size: 11px;
+}
+
+.concept-card figcaption span {
+  color: var(--muted);
+  font-size: 9px;
+}
+
+.concept-card figcaption a {
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.concept-focus-image {
+  width: min(100%, 1100px);
+  height: auto;
+  display: block;
+  border: 1px solid var(--line);
+}
+
+.concept-focus-meta {
+  margin: 10px 0 0;
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.operation-list {
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 7px;
+  list-style: none;
+}
+
+.operation-list li {
+  padding: 9px;
+  display: grid;
+  gap: 5px;
+  border: 1px solid var(--line);
+  background: #fff;
+}
+
+.operation-list li > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 9px;
+}
+
+.operation-list small {
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.operation-list code {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 8px;
+}
+
+.run-status--cancelled {
+  color: var(--amber);
+}
+
 @media (max-width: 1080px) {
   .configuration-hero {
     align-items: flex-start;
@@ -2130,6 +2298,15 @@ a {
   .artifact-toolbar > div {
     align-items: flex-start;
     flex-wrap: wrap;
+  }
+
+  .concept-gallery-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .concept-grid {
+    grid-template-columns: 1fr;
   }
 
   .artifact-tools input {

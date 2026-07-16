@@ -16,6 +16,7 @@ interface ProjectRow {
   updated_at: string;
   name_is_automatic: number;
   design_brief_present?: number;
+  concept_screen_set_present?: number;
 }
 
 export interface ProjectServiceOptions {
@@ -134,7 +135,12 @@ export async function openProjectService(
                  SELECT 1 FROM current_artifacts AS current
                  WHERE current.project_id = project.id
                    AND current.stage_id = 'design_brief'
-               ) AS design_brief_present
+               ) AS design_brief_present,
+               EXISTS (
+                 SELECT 1 FROM current_artifacts AS current
+                 WHERE current.project_id = project.id
+                   AND current.stage_id = 'concept_screens'
+               ) AS concept_screen_set_present
         FROM projects AS project
         ORDER BY updated_at DESC, created_at DESC, id ASC
       `).all() as unknown as ProjectRow[];
@@ -145,6 +151,7 @@ export async function openProjectService(
         updatedAt: row.updated_at,
         insightSourcePresent: row.insight_source.trim().length > 0,
         designBriefPresent: row.design_brief_present === 1,
+        conceptScreenSetPresent: row.concept_screen_set_present === 1,
       }));
     },
 

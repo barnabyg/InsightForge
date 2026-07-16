@@ -12,6 +12,7 @@ export interface ProjectSummary {
   updatedAt: string;
   insightSourcePresent: boolean;
   designBriefPresent: boolean;
+  conceptScreenSetPresent: boolean;
 }
 
 export interface CreateProjectInput {

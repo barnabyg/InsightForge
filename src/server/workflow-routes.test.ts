@@ -73,4 +73,70 @@ describe('Workflow HTTP API', () => {
     });
     expect(retrieved.json().designBrief).toEqual(generated.json().designBrief);
   });
+
+  it('generates and retrieves a coordinated Concept Screen Set and its PNG assets', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const app = await buildApp({ dataDirectory, mode: 'mock' });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Coordinated comparison journey',
+        insightSource: 'People need to compare options, inspect trade-offs, and record a choice.',
+      },
+    });
+    const projectId = created.json().id as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/design-brief-runs`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/concept-screen-runs`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(generated.statusCode).toBe(201);
+    expect(generated.json()).toMatchObject({
+      projectId,
+      conceptScreenSet: {
+        stageId: 'concept_screens',
+        validation: { status: 'valid', screenCount: 3, width: 1024, height: 768 },
+        screens: [
+          { ordinal: 1, mediaType: 'image/png' },
+          { ordinal: 2, mediaType: 'image/png' },
+          { ordinal: 3, mediaType: 'image/png' },
+        ],
+      },
+      lastConceptScreenRun: {
+        status: 'succeeded',
+        completedOperationCount: 3,
+        operations: [
+          { ordinal: 1, status: 'succeeded' },
+          { ordinal: 2, status: 'succeeded' },
+          { ordinal: 3, status: 'succeeded' },
+        ],
+      },
+    });
+    const screens = generated.json().conceptScreenSet.screens as Array<{
+      downloadUrl: string;
+    }>;
+    for (const screen of screens) {
+      const asset = await app.inject({
+        method: 'GET',
+        url: screen.downloadUrl,
+        headers: { host: 'localhost:4317' },
+      });
+      expect(asset.statusCode).toBe(200);
+      expect(asset.headers['content-type']).toBe('image/png');
+      expect(asset.rawPayload.subarray(0, 8)).toEqual(
+        Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]),
+      );
+    }
+  });
 });

@@ -43,6 +43,8 @@ Design Brief mock runs are deterministic. For validation and diagnostic testing,
 - `[mock:failure]` simulates a failed OpenAI request.
 - `[mock:refusal]` simulates an explicit model refusal.
 
+Concept Screen mock runs produce three deterministic 1024 × 768 PNG interfaces. Include `[mock:image-failure-once-2]` in the Insight Source to fail Screen 2 once, then exercise explicit resume without regenerating Screen 1.
+
 By default, application data is stored in the current user's operating-system application-data directory. Tests and isolated development sessions can set `INSIGHTFORGE_DATA_DIR` to override that location.
 
 ## Verification

@@ -16,16 +16,21 @@ export interface ProjectWorkflowController {
   workflow: ProjectWorkflow | null;
   loading: boolean;
   generating: boolean;
+  generatingStage: 'design_brief' | 'concept_screens' | null;
+  cancelling: boolean;
   error: string | null;
   refresh(): Promise<ProjectWorkflow>;
   generateDesignBrief(): Promise<ProjectWorkflow>;
+  generateConceptScreens(): Promise<ProjectWorkflow>;
+  cancelConceptScreens(): Promise<void>;
   clearError(): void;
 }
 
 export function useProjectWorkflow(projectId: string): ProjectWorkflowController {
   const [workflow, setWorkflow] = useState<ProjectWorkflow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [generating, setGenerating] = useState(false);
+  const [generatingStage, setGeneratingStage] = useState<'design_brief' | 'concept_screens' | null>(null);
+  const [cancelling, setCancelling] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -58,15 +63,25 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
     };
   }, [projectId]);
 
+  useEffect(() => {
+    if (generatingStage !== 'concept_screens') return;
+    const timer = window.setInterval(() => {
+      void refresh().catch(() => undefined);
+    }, 180);
+    return () => window.clearInterval(timer);
+  }, [generatingStage, refresh]);
+
   return {
     workflow,
     loading,
-    generating,
+    generating: generatingStage !== null,
+    generatingStage,
+    cancelling,
     error,
     refresh,
 
     async generateDesignBrief() {
-      setGenerating(true);
+      setGeneratingStage('design_brief');
       setError(null);
       try {
         const next = await requestWorkflow(
@@ -83,7 +98,44 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
         await refresh().catch(() => undefined);
         throw generationError;
       } finally {
-        setGenerating(false);
+        setGeneratingStage(null);
+      }
+    },
+
+    async generateConceptScreens() {
+      setGeneratingStage('concept_screens');
+      setCancelling(false);
+      setError(null);
+      try {
+        const next = await requestWorkflow(
+          `/api/projects/${projectId}/concept-screen-runs`,
+          { method: 'POST' },
+        );
+        setWorkflow(next);
+        return next;
+      } catch (generationError) {
+        const message = generationError instanceof Error
+          ? generationError.message
+          : 'Concept Screen generation failed.';
+        setError(message);
+        await refresh().catch(() => undefined);
+        throw generationError;
+      } finally {
+        setGeneratingStage(null);
+        setCancelling(false);
+      }
+    },
+
+    async cancelConceptScreens() {
+      setCancelling(true);
+      const response = await fetch(
+        `/api/projects/${projectId}/concept-screen-runs/active`,
+        { method: 'DELETE' },
+      );
+      if (!response.ok) {
+        setCancelling(false);
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? 'Concept Screen generation could not be cancelled.');
       }
     },
 

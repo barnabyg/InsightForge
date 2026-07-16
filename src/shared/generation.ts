@@ -4,6 +4,75 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
+export interface ConceptScreenValidation {
+  status: 'valid' | 'valid_with_warnings';
+  screenCount: number;
+  width: number;
+  height: number;
+  warnings: Array<{
+    code: 'undersized_concept_screens';
+    message: string;
+  }>;
+}
+
+export interface ConceptScreen {
+  assetId: string;
+  ordinal: 1 | 2 | 3;
+  width: number;
+  height: number;
+  byteSize: number;
+  mediaType: 'image/png';
+  downloadUrl: string;
+  requestId: string | null;
+  responseId: string | null;
+  usage: TokenUsage;
+}
+
+export interface ConceptScreenSetArtifact {
+  id: string;
+  projectId: string;
+  stageId: 'concept_screens';
+  runId: string;
+  createdAt: string;
+  validation: ConceptScreenValidation;
+  screens: ConceptScreen[];
+}
+
+export interface ConceptScreenOperation {
+  ordinal: 1 | 2 | 3;
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  width: number | null;
+  height: number | null;
+  requestId: string | null;
+  responseId: string | null;
+  usage: TokenUsage | null;
+  error: { code: string; message: string } | null;
+}
+
+export interface ConceptScreenRun {
+  id: string;
+  projectId: string;
+  stageId: 'concept_screens';
+  status: 'running' | 'succeeded' | 'failed' | 'cancelled';
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  stagePrompt: string;
+  model: string;
+  imageQuality: 'low' | 'medium' | 'high';
+  stageConfigurationUpdatedAt: string;
+  stageInput: { name: 'Design Brief'; value: string };
+  assembledRequest: string;
+  completedOperationCount: number;
+  operations: ConceptScreenOperation[];
+  usage: TokenUsage | null;
+  validation: ConceptScreenValidation | null;
+  error: { code: string; message: string } | null;
+}
+
 export interface SanityWarning {
   code: 'below_recommended_word_count';
   message: string;
@@ -59,6 +128,15 @@ export interface ProjectWorkflow {
   lastDesignBriefRun: DesignBriefRun | null;
   designBriefConfiguration: {
     model: string;
+    promptUpdatedAt: string;
+  };
+  canGenerateConceptScreens: boolean;
+  conceptScreenGenerationBlocker: string | null;
+  conceptScreenSet: ConceptScreenSetArtifact | null;
+  lastConceptScreenRun: ConceptScreenRun | null;
+  conceptScreenConfiguration: {
+    model: string;
+    imageQuality: 'low' | 'medium' | 'high';
     promptUpdatedAt: string;
   };
 }

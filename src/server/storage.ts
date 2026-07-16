@@ -44,8 +44,8 @@ export async function initializeStorage(
         value TEXT NOT NULL
       );
       INSERT INTO app_metadata (key, value)
-      VALUES ('schema_version', '1')
-      ON CONFLICT(key) DO NOTHING;
+      VALUES ('schema_version', '2')
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
@@ -94,6 +94,7 @@ export async function initializeStorage(
         stage_configuration_updated_at TEXT NOT NULL,
         input_snapshot TEXT NOT NULL,
         assembled_request TEXT NOT NULL,
+        settings_json TEXT,
         response_id TEXT,
         request_id TEXT,
         usage_json TEXT,
@@ -122,7 +123,44 @@ export async function initializeStorage(
           REFERENCES artifacts(id) ON DELETE CASCADE,
         PRIMARY KEY (project_id, stage_id)
       );
+
+      CREATE TABLE IF NOT EXISTS binary_assets (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL
+          REFERENCES projects(id) ON DELETE CASCADE,
+        run_id TEXT NOT NULL
+          REFERENCES stage_runs(id) ON DELETE CASCADE,
+        relative_path TEXT NOT NULL UNIQUE,
+        media_type TEXT NOT NULL CHECK (media_type = 'image/png'),
+        byte_size INTEGER NOT NULL,
+        width INTEGER NOT NULL,
+        height INTEGER NOT NULL,
+        created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS concept_screen_operations (
+        run_id TEXT NOT NULL
+          REFERENCES stage_runs(id) ON DELETE CASCADE,
+        ordinal INTEGER NOT NULL CHECK (ordinal BETWEEN 1 AND 3),
+        status TEXT NOT NULL CHECK (status IN ('running', 'succeeded', 'failed')),
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        duration_ms INTEGER,
+        asset_id TEXT REFERENCES binary_assets(id) ON DELETE SET NULL,
+        response_id TEXT,
+        request_id TEXT,
+        usage_json TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        PRIMARY KEY (run_id, ordinal)
+      );
     `);
+
+    const stageRunColumns = database.prepare('PRAGMA table_info(stage_runs)')
+      .all() as unknown as Array<{ name: string }>;
+    if (!stageRunColumns.some(({ name }) => name === 'settings_json')) {
+      database.exec('ALTER TABLE stage_runs ADD COLUMN settings_json TEXT;');
+    }
 
     const insertDefault = database.prepare(`
       INSERT INTO stage_configurations (

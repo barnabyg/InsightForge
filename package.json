@@ -21,12 +21,14 @@
   "dependencies": {
     "fastify": "^5.6.2",
     "openai": "^6.16.0",
+    "pngjs": "^7.0.0",
     "react": "^19.2.4",
     "react-dom": "^19.2.4"
   },
   "devDependencies": {
     "@playwright/test": "^1.61.1",
     "@types/node": "^24.10.9",
+    "@types/pngjs": "^6.0.5",
     "@types/react": "^19.2.13",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Project } from '../shared/projects.js';
 import { MarkdownArtifact } from './MarkdownArtifact.js';
+import { ConceptScreenGallery } from './ConceptScreenGallery.js';
+import { ConceptScreenRunInspector } from './ConceptScreenRunInspector.js';
 import { Modal } from './Modal.js';
 import { RunInspector } from './RunInspector.js';
 import { useProjectWorkflow } from './useProjectWorkflow.js';
@@ -13,7 +15,7 @@ interface ProjectWorkspaceProps {
 }
 
 type SaveState = 'saved' | 'pending' | 'saving' | 'error';
-type SelectedStage = 'insight_source' | 'design_brief';
+type SelectedStage = 'insight_source' | 'design_brief' | 'concept_screens';
 
 interface PendingImport {
   name: string;
@@ -134,7 +136,7 @@ export function ProjectWorkspace({
   }
 
   async function selectStage(stage: SelectedStage) {
-    if (stage === 'design_brief') {
+    if (stage !== 'insight_source') {
       try {
         await flushLatestInsight();
         await workflow.refresh();
@@ -156,6 +158,13 @@ export function ProjectWorkspace({
     : workflow.workflow?.designBrief
       ? 'Current'
       : insight.trim()
+        ? 'Ready'
+        : 'Waiting';
+  const conceptScreenState = workflow.generatingStage === 'concept_screens'
+    ? 'Generating'
+    : workflow.workflow?.conceptScreenSet
+      ? 'Current'
+      : workflow.workflow?.designBrief
         ? 'Ready'
         : 'Waiting';
   const insightLocked = Boolean(workflow.workflow?.designBrief);
@@ -193,10 +202,10 @@ export function ProjectWorkspace({
               <span><strong>Design Brief</strong><small>{designBriefState}</small></span>
             </button>
           </li>
-          <li>
-            <button type="button" disabled>
+          <li className={selectedStage === 'concept_screens' ? styles['stage-rail-active'] : ''}>
+            <button type="button" onClick={() => void selectStage('concept_screens')}>
               <span className={styles['rail-number']}>03</span>
-              <span><strong>Concept Screens</strong><small>Waiting</small></span>
+              <span><strong>Concept Screens</strong><small>{conceptScreenState}</small></span>
             </button>
           </li>
           <li>
@@ -276,7 +285,7 @@ export function ProjectWorkspace({
             </div>
           </aside>
         </main>
-      ) : (
+      ) : selectedStage === 'design_brief' ? (
         <main className={`${styles['artifact-canvas']} ${styles['design-brief-canvas']}`}>
           <header className={styles['project-heading']}>
             <div>
@@ -340,6 +349,90 @@ export function ProjectWorkspace({
             <RunInspector
               run={workflow.workflow?.lastDesignBriefRun ?? null}
               generating={workflow.generating}
+              elapsedSeconds={elapsedSeconds}
+            />
+          </div>
+        </main>
+      ) : (
+        <main className={`${styles['artifact-canvas']} ${styles['design-brief-canvas']}`}>
+          <header className={styles['project-heading']}>
+            <div>
+              <p className={styles.eyebrow}>Stage 03 · {project.name}</p>
+              <h1>Concept Screens</h1>
+            </div>
+            {workflow.workflow?.conceptScreenSet && (
+              <span className={styles['artifact-date']}>
+                Generated <time dateTime={workflow.workflow.conceptScreenSet.createdAt}>
+                  {new Date(workflow.workflow.conceptScreenSet.createdAt).toLocaleString('en-GB')}
+                </time>
+              </span>
+            )}
+          </header>
+
+          {workflow.error && (
+            <div className={styles['workspace-error']} role="alert">
+              <span>{workflow.error}</span>
+              <button type="button" onClick={workflow.clearError}>Dismiss</button>
+            </div>
+          )}
+
+          <div className={styles['design-brief-layout']}>
+            <div className={styles['design-brief-main']}>
+              <section className={styles['stage-action-card']} aria-label="Concept Screen generation">
+                <div>
+                  <p className={styles.eyebrow}>Shared Stage Configuration</p>
+                  <strong>{workflow.workflow?.conceptScreenConfiguration.model ?? 'Loading model…'}</strong>
+                  <span>
+                    {workflow.workflow?.conceptScreenConfiguration.imageQuality ?? '—'} quality · three sequential PNG operations using the protected Design Brief.
+                  </span>
+                </div>
+                <a href="/?view=prompts">Edit shared prompt</a>
+                {workflow.generatingStage === 'concept_screens' ? (
+                  <button
+                    className={styles['secondary-action']}
+                    type="button"
+                    disabled={workflow.cancelling}
+                    onClick={() => void workflow.cancelConceptScreens().catch(() => undefined)}
+                  >{workflow.cancelling ? 'Cancelling…' : 'Cancel after current screen'}</button>
+                ) : (
+                  <button
+                    className={styles['primary-action']}
+                    type="button"
+                    disabled={workflow.loading || workflow.generating || !workflow.workflow?.canGenerateConceptScreens}
+                    onClick={() => void workflow.generateConceptScreens().catch(() => undefined)}
+                  >
+                    {workflow.workflow?.lastConceptScreenRun
+                      && workflow.workflow.lastConceptScreenRun.status !== 'succeeded'
+                      && workflow.workflow.lastConceptScreenRun.completedOperationCount < 3
+                      ? `Resume from Screen ${workflow.workflow.lastConceptScreenRun.completedOperationCount + 1}`
+                      : workflow.workflow?.conceptScreenSet
+                        ? 'Generate another variation'
+                        : 'Generate Concept Screens'}
+                  </button>
+                )}
+              </section>
+
+              {workflow.workflow?.conceptScreenGenerationBlocker && (
+                <p className={styles['generation-blocker']}>{workflow.workflow.conceptScreenGenerationBlocker}</p>
+              )}
+
+              {workflow.workflow?.conceptScreenSet ? (
+                <ConceptScreenGallery
+                  artifact={workflow.workflow.conceptScreenSet}
+                  projectName={project.name}
+                />
+              ) : (
+                <section className={styles['artifact-empty']}>
+                  <span aria-hidden="true">03</span>
+                  <h2>Make the primary journey tangible</h2>
+                  <p>Three coordinated, read-only Concept Screens will appear here after sequential image generation succeeds.</p>
+                </section>
+              )}
+            </div>
+
+            <ConceptScreenRunInspector
+              run={workflow.workflow?.lastConceptScreenRun ?? null}
+              generating={workflow.generatingStage === 'concept_screens'}
               elapsedSeconds={elapsedSeconds}
             />
           </div>
