@@ -93,6 +93,8 @@ export async function initializeStorage(
         model_snapshot TEXT NOT NULL,
         stage_configuration_updated_at TEXT NOT NULL,
         input_snapshot TEXT NOT NULL,
+        input_artifact_id TEXT,
+        input_run_id TEXT,
         assembled_request TEXT NOT NULL,
         settings_json TEXT,
         response_id TEXT,
@@ -160,6 +162,12 @@ export async function initializeStorage(
       .all() as unknown as Array<{ name: string }>;
     if (!stageRunColumns.some(({ name }) => name === 'settings_json')) {
       database.exec('ALTER TABLE stage_runs ADD COLUMN settings_json TEXT;');
+    }
+    if (!stageRunColumns.some(({ name }) => name === 'input_artifact_id')) {
+      database.exec('ALTER TABLE stage_runs ADD COLUMN input_artifact_id TEXT;');
+    }
+    if (!stageRunColumns.some(({ name }) => name === 'input_run_id')) {
+      database.exec('ALTER TABLE stage_runs ADD COLUMN input_run_id TEXT;');
     }
 
     const insertDefault = database.prepare(`

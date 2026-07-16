@@ -75,7 +75,12 @@ export interface ConceptScreenRun {
   model: string;
   imageQuality: 'low' | 'medium' | 'high';
   stageConfigurationUpdatedAt: string;
-  stageInput: { name: 'Design Brief'; value: string };
+  stageInput: {
+    name: 'Design Brief';
+    value: string;
+    artifactId: string | null;
+    runId: string | null;
+  };
   assembledRequest: string;
   completedOperationCount: number;
   operations: ConceptScreenOperation[];

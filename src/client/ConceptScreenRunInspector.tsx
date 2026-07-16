@@ -14,6 +14,10 @@ function formatDuration(milliseconds: number | null): string {
   return `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
+function formatTimestamp(value: string | null): string {
+  return value ? new Date(value).toLocaleString('en-GB') : 'In progress';
+}
+
 function statusLabel(status: ConceptScreenRun['status']): string {
   if (status === 'succeeded') return 'Succeeded';
   if (status === 'cancelled') return 'Cancelled';
@@ -64,6 +68,12 @@ export function ConceptScreenRunInspector({
             <div><dt>Quality</dt><dd>{run.imageQuality[0].toUpperCase() + run.imageQuality.slice(1)}</dd></div>
             <div><dt>Progress</dt><dd>{run.completedOperationCount} of 3 PNGs</dd></div>
             <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
+            <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{formatTimestamp(run.startedAt)}</time></dd></div>
+            <div><dt>Completed</dt><dd>{run.completedAt
+              ? <time dateTime={run.completedAt}>{formatTimestamp(run.completedAt)}</time>
+              : 'In progress'}</dd></div>
+            <div><dt>Input artifact</dt><dd><code>{run.stageInput.artifactId ?? 'Legacy run'}</code></dd></div>
+            <div><dt>Input run</dt><dd><code>{run.stageInput.runId ?? 'Legacy run'}</code></dd></div>
             {run.validation && (
               <div><dt>Validation</dt><dd>{run.validation.width} × {run.validation.height} · {run.validation.status === 'valid' ? 'Valid' : 'Warning'}</dd></div>
             )}
@@ -75,8 +85,17 @@ export function ConceptScreenRunInspector({
               {run.operations.map((operation) => (
                 <li key={operation.ordinal}>
                   <div><strong>Screen {operation.ordinal}</strong><span>{statusLabel(operation.status)}</span></div>
-                  <small>{operation.width && operation.height ? `${operation.width} × ${operation.height}` : formatDuration(operation.durationMs)}</small>
-                  {operation.requestId && <code>{operation.requestId}</code>}
+                  <small>
+                    {operation.width && operation.height ? `${operation.width} × ${operation.height} · ` : ''}
+                    {formatTimestamp(operation.startedAt)} → {formatTimestamp(operation.completedAt)} · {formatDuration(operation.durationMs)}
+                  </small>
+                  {operation.requestId && <code>Request {operation.requestId}</code>}
+                  {operation.responseId && <code>Response {operation.responseId}</code>}
+                  {operation.usage && (
+                    <small>
+                      Usage {operation.usage.inputTokens} input · {operation.usage.outputTokens} output · {operation.usage.totalTokens} total
+                    </small>
+                  )}
                 </li>
               ))}
             </ol>

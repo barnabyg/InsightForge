@@ -267,6 +267,10 @@ describe('Workflow service', () => {
     });
     expect(generated.lastConceptScreenRun).toMatchObject({
       status: 'succeeded',
+      stageInput: {
+        artifactId: generated.designBrief?.id,
+        runId: generated.designBrief?.runId,
+      },
       completedOperationCount: 3,
       usage: { inputTokens: 600, outputTokens: 1200, totalTokens: 1800 },
       operations: [

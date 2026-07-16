@@ -64,6 +64,8 @@ interface RunRow {
   model_snapshot: string;
   stage_configuration_updated_at: string;
   input_snapshot: string;
+  input_artifact_id: string | null;
+  input_run_id: string | null;
   assembled_request: string;
   settings_json: string | null;
   response_id: string | null;
@@ -299,7 +301,12 @@ function conceptRunFromRows(
     model: row.model_snapshot,
     imageQuality: settings?.imageQuality ?? 'medium',
     stageConfigurationUpdatedAt: row.stage_configuration_updated_at,
-    stageInput: { name: 'Design Brief', value: row.input_snapshot },
+    stageInput: {
+      name: 'Design Brief',
+      value: row.input_snapshot,
+      artifactId: row.input_artifact_id,
+      runId: row.input_run_id,
+    },
     assembledRequest: row.assembled_request,
     completedOperationCount: operations.filter(({ status }) => status === 'succeeded').length,
     operations: operations.map(conceptOperationFromRow),
@@ -637,11 +644,15 @@ export async function openWorkflowService(
         );
       }
       const designBrief = database.prepare(`
-        SELECT artifact.markdown
+        SELECT artifact.id, artifact.run_id, artifact.markdown
         FROM current_artifacts AS current
         JOIN artifacts AS artifact ON artifact.id = current.artifact_id
         WHERE current.project_id = ? AND current.stage_id = 'design_brief'
-      `).get(projectId) as unknown as { markdown: string } | undefined;
+      `).get(projectId) as unknown as {
+        id: string;
+        run_id: string;
+        markdown: string;
+      } | undefined;
       if (!designBrief) {
         throw new WorkflowValidationError(
           'Generate a Design Brief before generating Concept Screens.',
@@ -692,8 +703,9 @@ export async function openWorkflowService(
           INSERT INTO stage_runs (
             id, project_id, stage_id, status, started_at,
             prompt_snapshot, model_snapshot, stage_configuration_updated_at,
-            input_snapshot, assembled_request, settings_json
-          ) VALUES (?, ?, 'concept_screens', 'running', ?, ?, ?, ?, ?, ?, ?)
+            input_snapshot, input_artifact_id, input_run_id,
+            assembled_request, settings_json
+          ) VALUES (?, ?, 'concept_screens', 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           runId,
           projectId,
@@ -702,6 +714,8 @@ export async function openWorkflowService(
           configuration.model,
           configuration.updated_at,
           designBrief.markdown,
+          designBrief.id,
+          designBrief.run_id,
           assembledRequest,
           settingsJson,
         );
