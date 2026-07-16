@@ -656,16 +656,18 @@ export async function openWorkflowService(
         settingsJson,
       ) as unknown as RunRow | undefined;
       const runId = resumableRun?.id ?? randomUUID();
-      const startedAt = resumableRun
+      const runStartedAt = resumableRun
         ? new Date(resumableRun.started_at)
         : now();
+      const attemptStartedAt = now();
+      const priorDurationMs = resumableRun?.duration_ms ?? 0;
       if (resumableRun) {
         database.prepare(`
           UPDATE stage_runs
-          SET status = 'running', completed_at = NULL, duration_ms = NULL,
+          SET status = 'running', completed_at = NULL, duration_ms = ?,
               validation_json = NULL, error_code = NULL, error_message = NULL
           WHERE id = ?
-        `).run(runId);
+        `).run(priorDurationMs, runId);
       } else {
         database.prepare(`
           INSERT INTO stage_runs (
@@ -676,7 +678,7 @@ export async function openWorkflowService(
         `).run(
           runId,
           projectId,
-          startedAt.toISOString(),
+          runStartedAt.toISOString(),
           configuration.prompt,
           configuration.model,
           configuration.updated_at,
@@ -824,7 +826,10 @@ export async function openWorkflowService(
             WHERE id = ?
           `).run(
             completedAt.toISOString(),
-            Math.max(0, completedAt.getTime() - startedAt.getTime()),
+            priorDurationMs + Math.max(
+              0,
+              completedAt.getTime() - attemptStartedAt.getTime(),
+            ),
             JSON.stringify(totalUsage),
             JSON.stringify(validation),
             runId,
@@ -890,7 +895,10 @@ export async function openWorkflowService(
           WHERE id = ?
         `).run(
           completedAt.toISOString(),
-          Math.max(0, completedAt.getTime() - startedAt.getTime()),
+          priorDurationMs + Math.max(
+            0,
+            completedAt.getTime() - attemptStartedAt.getTime(),
+          ),
           JSON.stringify(totalUsage),
           code,
           message,

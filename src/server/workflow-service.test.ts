@@ -275,6 +275,7 @@ describe('Workflow service', () => {
     const project = projects.createProject({ insightSource: 'A comparison journey needs visual structure.' });
     const calls: number[] = [];
     let screenTwoAttempts = 0;
+    let currentTime = Date.parse('2026-07-16T12:00:00.000Z');
     const pngs = [pngFixture(30), pngFixture(60), pngFixture(90)];
     const workflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
@@ -290,6 +291,7 @@ describe('Workflow service', () => {
       imageGeneration: {
         async generateConceptScreen(input) {
           calls.push(input.ordinal);
+          currentTime += 1_000;
           if (input.ordinal === 2 && screenTwoAttempts++ === 0) {
             throw new GenerationBoundaryError(
               'openai_request_failed',
@@ -305,6 +307,7 @@ describe('Workflow service', () => {
           };
         },
       },
+      now: () => new Date(currentTime),
     });
     workflowServices.push(workflows);
     await workflows.generateDesignBrief(project.id);
@@ -316,6 +319,7 @@ describe('Workflow service', () => {
     expect(failed.conceptScreenSet).toBeNull();
     expect(failed.lastConceptScreenRun).toMatchObject({
       status: 'failed',
+      durationMs: 2_000,
       completedOperationCount: 1,
       operations: [
         { ordinal: 1, status: 'succeeded' },
@@ -323,12 +327,14 @@ describe('Workflow service', () => {
       ],
     });
 
+    currentTime += 60_000;
     const resumed = await workflows.generateConceptScreens(project.id);
 
     expect(calls).toEqual([1, 2, 2, 3]);
     expect(resumed.lastConceptScreenRun?.id).toBe(failed.lastConceptScreenRun?.id);
     expect(resumed.lastConceptScreenRun).toMatchObject({
       status: 'succeeded',
+      durationMs: 4_000,
       completedOperationCount: 3,
       usage: { inputTokens: 300, outputTokens: 600, totalTokens: 900 },
     });
