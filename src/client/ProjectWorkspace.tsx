@@ -434,6 +434,7 @@ export function ProjectWorkspace({
               run={workflow.workflow?.lastConceptScreenRun ?? null}
               generating={workflow.generatingStage === 'concept_screens'}
               elapsedSeconds={elapsedSeconds}
+              progress={workflow.conceptScreenProgress}
             />
           </div>
         </main>

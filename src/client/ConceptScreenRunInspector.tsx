@@ -1,10 +1,11 @@
-import type { ConceptScreenRun } from '../shared/generation.js';
+import type { ConceptScreenProgressEvent, ConceptScreenRun } from '../shared/generation.js';
 import styles from './App.module.css';
 
 interface ConceptScreenRunInspectorProps {
   run: ConceptScreenRun | null;
   generating: boolean;
   elapsedSeconds: number;
+  progress: ConceptScreenProgressEvent | null;
 }
 
 function formatDuration(milliseconds: number | null): string {
@@ -24,8 +25,20 @@ export function ConceptScreenRunInspector({
   run,
   generating,
   elapsedSeconds,
+  progress,
 }: ConceptScreenRunInspectorProps) {
-  const nextOrdinal = Math.min(3, (run?.completedOperationCount ?? 0) + 1);
+  const nextOrdinal = progress?.currentOrdinal
+    ?? Math.min(3, (run?.completedOperationCount ?? 0) + 1);
+  const progressLabel = progress?.phase === 'validating'
+    ? 'Validating Concept Screen Set'
+    : progress?.phase === 'promoting'
+      ? 'Promoting consistent workflow state'
+      : progress?.phase === 'completed'
+        ? 'Concept Screen Set complete'
+        : `Generating Concept Screen ${nextOrdinal}`;
+  const progressElapsedSeconds = progress
+    ? Math.floor(progress.elapsedMs / 1_000)
+    : elapsedSeconds;
   return (
     <aside className={styles['run-inspector']} aria-label="Run Inspector">
       <div className={styles['inspector-heading']}>
@@ -36,8 +49,8 @@ export function ConceptScreenRunInspector({
       {generating && (
         <div className={styles['run-progress']} role="status" aria-label="Generating Concept Screens">
           <span className={styles['progress-spinner']} aria-hidden="true" />
-          <strong>Generating Concept Screens</strong>
-          <span>Screen {nextOrdinal} of 3 · {elapsedSeconds}s elapsed</span>
+          <strong>{progressLabel}</strong>
+          <span>{progress?.completedOperationCount ?? run?.completedOperationCount ?? 0} of 3 complete · {progressElapsedSeconds}s elapsed</span>
         </div>
       )}
 

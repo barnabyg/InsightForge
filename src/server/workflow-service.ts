@@ -8,6 +8,7 @@ import type {
   ArtifactValidation,
   ConceptScreenOperation,
   ConceptScreenOrdinal,
+  ConceptScreenProgressEvent,
   ConceptScreenRun,
   ConceptScreenSetArtifact,
   ConceptScreenValidation,
@@ -105,6 +106,10 @@ export interface WorkflowService {
   generateDesignBrief(projectId: string): Promise<ProjectWorkflow>;
   generateConceptScreens(projectId: string): Promise<ProjectWorkflow>;
   cancelConceptScreens(projectId: string): boolean;
+  subscribeConceptScreenProgress(
+    projectId: string,
+    listener: (event: ConceptScreenProgressEvent) => void,
+  ): () => void;
   close(): void;
 }
 
@@ -358,6 +363,20 @@ export async function openWorkflowService(
     runId: string;
     cancelRequested: boolean;
   }>();
+  const conceptProgressListeners = new Map<
+    string,
+    Set<(event: ConceptScreenProgressEvent) => void>
+  >();
+
+  function emitConceptProgress(event: ConceptScreenProgressEvent): void {
+    for (const listener of conceptProgressListeners.get(event.projectId) ?? []) {
+      try {
+        listener(event);
+      } catch {
+        // A disconnected observer must never interrupt an atomic Stage Run.
+      }
+    }
+  }
 
   function requireProject(projectId: string): ProjectRow {
     const project = database.prepare(`
@@ -730,6 +749,17 @@ export async function openWorkflowService(
             throw new WorkflowCancellationError();
           }
           const operationStartedAt = now();
+          emitConceptProgress({
+            projectId,
+            runId,
+            phase: 'generating',
+            currentOrdinal: ordinal,
+            completedOperationCount: completed.length,
+            elapsedMs: priorDurationMs + Math.max(
+              0,
+              operationStartedAt.getTime() - attemptStartedAt.getTime(),
+            ),
+          });
           database.prepare(`
             INSERT INTO concept_screen_operations (
               run_id, ordinal, status, started_at
@@ -814,10 +844,29 @@ export async function openWorkflowService(
           activeOperationIdentifiers = null;
         }
 
+        emitConceptProgress({
+          projectId,
+          runId,
+          phase: 'validating',
+          currentOrdinal: null,
+          completedOperationCount: completed.length,
+          elapsedMs: priorDurationMs + Math.max(0, now().getTime() - attemptStartedAt.getTime()),
+        });
         const operations = conceptOperations(runId);
         const validation = validateConceptScreenSet(operations);
         const completedAt = now();
         const artifactId = randomUUID();
+        emitConceptProgress({
+          projectId,
+          runId,
+          phase: 'promoting',
+          currentOrdinal: null,
+          completedOperationCount: completed.length,
+          elapsedMs: priorDurationMs + Math.max(
+            0,
+            completedAt.getTime() - attemptStartedAt.getTime(),
+          ),
+        });
         database.exec('BEGIN IMMEDIATE;');
         try {
           database.prepare(`
@@ -856,6 +905,17 @@ export async function openWorkflowService(
           database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
             .run(completedAt.toISOString(), projectId);
           database.exec('COMMIT;');
+          emitConceptProgress({
+            projectId,
+            runId,
+            phase: 'completed',
+            currentOrdinal: null,
+            completedOperationCount: completed.length,
+            elapsedMs: priorDurationMs + Math.max(
+              0,
+              completedAt.getTime() - attemptStartedAt.getTime(),
+            ),
+          });
         } catch (error) {
           database.exec('ROLLBACK;');
           throw error;
@@ -910,6 +970,17 @@ export async function openWorkflowService(
           message,
           runId,
         );
+        emitConceptProgress({
+          projectId,
+          runId,
+          phase: 'failed',
+          currentOrdinal: null,
+          completedOperationCount: completed.length,
+          elapsedMs: priorDurationMs + Math.max(
+            0,
+            completedAt.getTime() - attemptStartedAt.getTime(),
+          ),
+        });
         activeConceptRuns.delete(projectId);
         throw new WorkflowGenerationError(code, message);
       }
@@ -924,6 +995,17 @@ export async function openWorkflowService(
       if (!active) return false;
       active.cancelRequested = true;
       return true;
+    },
+
+    subscribeConceptScreenProgress(projectId, listener) {
+      requireProject(projectId);
+      const listeners = conceptProgressListeners.get(projectId) ?? new Set();
+      listeners.add(listener);
+      conceptProgressListeners.set(projectId, listeners);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) conceptProgressListeners.delete(projectId);
+      };
     },
 
     close() {

@@ -223,9 +223,23 @@ describe('Workflow service', () => {
     });
     workflowServices.push(workflows);
     await workflows.generateDesignBrief(project.id);
+    const progressPhases: string[] = [];
+    const unsubscribe = workflows.subscribeConceptScreenProgress(
+      project.id,
+      (event) => progressPhases.push(event.phase),
+    );
 
     const generated = await workflows.generateConceptScreens(project.id);
+    unsubscribe();
 
+    expect(progressPhases).toEqual([
+      'generating',
+      'generating',
+      'generating',
+      'validating',
+      'promoting',
+      'completed',
+    ]);
     expect(imageInputs.map((input) => ({
       ordinal: input.ordinal,
       references: input.references.map((reference) => reference.ordinal),

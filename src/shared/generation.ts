@@ -6,6 +6,15 @@ export interface TokenUsage {
 
 export type ConceptScreenOrdinal = 1 | 2 | 3;
 
+export interface ConceptScreenProgressEvent {
+  projectId: string;
+  runId: string;
+  phase: 'generating' | 'validating' | 'promoting' | 'completed' | 'failed';
+  currentOrdinal: ConceptScreenOrdinal | null;
+  completedOperationCount: number;
+  elapsedMs: number;
+}
+
 export interface ConceptScreenValidation {
   status: 'valid' | 'valid_with_warnings';
   screenCount: number;

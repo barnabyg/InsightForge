@@ -64,6 +64,29 @@ export function registerWorkflowRoutes(
     },
   );
 
+  app.get<{ Params: ProjectParameters }>(
+    '/api/projects/:id/concept-screen-runs/events',
+    (request, reply) => {
+      try {
+        workflows.getProjectWorkflow(request.params.id);
+        reply.hijack();
+        reply.raw.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive',
+        });
+        reply.raw.write(': connected\n\n');
+        const unsubscribe = workflows.subscribeConceptScreenProgress(
+          request.params.id,
+          (event) => reply.raw.write(`data: ${JSON.stringify(event)}\n\n`),
+        );
+        request.raw.once('close', unsubscribe);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
   app.post<{ Params: ProjectParameters }>(
     '/api/projects/:id/concept-screen-runs',
     async (request, reply) => {
