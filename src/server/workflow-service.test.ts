@@ -261,13 +261,6 @@ describe('Workflow service', () => {
         { ordinal: 3, status: 'succeeded', requestId: 'req_screen_3' },
       ],
     });
-    expect(generated.canGenerateDesignBrief).toBe(false);
-    expect(generated.generationBlocker).toBe(
-      'Design Brief regeneration requires downstream cascade support once Concept Screens exist.',
-    );
-    await expect(workflows.generateDesignBrief(project.id)).rejects.toMatchObject({
-      message: 'Design Brief regeneration requires downstream cascade support once Concept Screens exist.',
-    });
     for (const screen of generated.conceptScreenSet!.screens) {
       expect(workflows.getConceptScreenAsset(project.id, screen.assetId))
         .toEqual(generatedPngs[screen.ordinal - 1]);

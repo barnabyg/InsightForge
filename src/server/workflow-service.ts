@@ -198,9 +198,6 @@ function runFromRow(row: RunRow | undefined): DesignBriefRun | null {
   };
 }
 
-const DESIGN_BRIEF_CASCADE_BLOCKER =
-  'Design Brief regeneration requires downstream cascade support once Concept Screens exist.';
-
 class WorkflowCancellationError extends Error {
   constructor() {
     super('Concept Screen generation was cancelled.');
@@ -445,15 +442,10 @@ export async function openWorkflowService(
       ? conceptOperations(conceptArtifact.run_id)
       : [];
     const hasInsight = project.insight_source.trim().length > 0;
-    const hasConceptScreens = Boolean(conceptArtifact);
     return {
       projectId,
-      canGenerateDesignBrief: hasInsight && !hasConceptScreens,
-      generationBlocker: !hasInsight
-        ? 'Add an Insight Source before generating a Design Brief.'
-        : hasConceptScreens
-          ? DESIGN_BRIEF_CASCADE_BLOCKER
-          : null,
+      canGenerateDesignBrief: hasInsight,
+      generationBlocker: hasInsight ? null : 'Add an Insight Source before generating a Design Brief.',
       designBrief: artifactFromRow(artifact),
       lastDesignBriefRun: runFromRow(lastRun),
       designBriefConfiguration: {
@@ -491,14 +483,6 @@ export async function openWorkflowService(
         throw new WorkflowValidationError(
           'Add an Insight Source before generating a Design Brief.',
         );
-      }
-      const downstreamArtifact = database.prepare(`
-        SELECT 1
-        FROM current_artifacts
-        WHERE project_id = ? AND stage_id = 'concept_screens'
-      `).get(projectId);
-      if (downstreamArtifact) {
-        throw new WorkflowValidationError(DESIGN_BRIEF_CASCADE_BLOCKER);
       }
       const configuration = designBriefConfiguration();
       const runId = randomUUID();
