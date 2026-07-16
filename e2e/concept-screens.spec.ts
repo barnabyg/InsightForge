@@ -46,6 +46,13 @@ test('Author generates and inspects a persisted coordinated Concept Screen Set',
   await expect(focus.getByText('100%')).toBeVisible();
   await focus.getByRole('button', { name: 'Close' }).click();
 
+  await page.getByRole('button', { name: /Design Brief/ }).click();
+  await page.getByRole('button', { name: 'Generate another variation' }).click();
+  const cascadePreview = page.getByRole('dialog', { name: 'Rerun downstream workflow?' });
+  await expect(cascadePreview).toContainText('new Design Brief');
+  await expect(cascadePreview).toContainText('three new Concept Screens');
+  await cascadePreview.getByRole('button', { name: 'Cancel' }).click();
+
   await page.reload();
   await page.getByRole('button', { name: /Concept Screens/ }).click();
   await expect(page.getByRole('article', { name: 'Concept Screen Set' }).getByRole('img'))

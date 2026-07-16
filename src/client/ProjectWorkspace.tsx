@@ -31,6 +31,7 @@ export function ProjectWorkspace({
   const [insight, setInsight] = useState(project.insightSource);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
+  const [confirmCascade, setConfirmCascade] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const workflow = useProjectWorkflow(project.id);
@@ -321,7 +322,13 @@ export function ProjectWorkspace({
                   className={styles['primary-action']}
                   type="button"
                   disabled={workflow.loading || workflow.generating || !workflow.workflow?.canGenerateDesignBrief}
-                  onClick={() => void workflow.generateDesignBrief().catch(() => undefined)}
+                  onClick={() => {
+                    if (workflow.workflow?.conceptScreenSet) {
+                      setConfirmCascade(true);
+                    } else {
+                      void workflow.generateDesignBrief().catch(() => undefined);
+                    }
+                  }}
                 >
                   {workflow.generating
                     ? 'Generating…'
@@ -453,6 +460,23 @@ export function ProjectWorkspace({
           </>}
         >
           <p>Importing <strong>{pendingImport.name}</strong> will replace the text currently in this Project. The imported file itself will not be stored.</p>
+        </Modal>
+      )}
+
+      {confirmCascade && (
+        <Modal
+          title="Rerun downstream workflow?"
+          onDismiss={() => setConfirmCascade(false)}
+          actions={<>
+            <button className={styles['secondary-action']} type="button" onClick={() => setConfirmCascade(false)}>Cancel</button>
+            <button className={styles['primary-action']} type="button" onClick={() => {
+              setConfirmCascade(false);
+              void workflow.generateDesignBrief().catch(() => undefined);
+            }}>Rerun Design Brief and Concept Screens</button>
+          </>}
+        >
+          <p>This cascade will generate a new Design Brief and then three new Concept Screens.</p>
+          <p>The current Design Brief and Concept Screen Set remain available unless the complete cascade succeeds.</p>
         </Modal>
       )}
     </div>
