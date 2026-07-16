@@ -4,7 +4,7 @@
 
 ### Issue tracker
 
-Issues and specs are tracked as local Markdown under `.scratch/`. See `docs/agents/issue-tracker.md`.
+Implementation work is tracked in GitHub Issues. Product specifications remain in the repository. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

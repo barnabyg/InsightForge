@@ -1,26 +1,33 @@
-# Issue tracker: Local Markdown
+# Issue tracker: GitHub Issues
 
-Issues and specs (also known as PRDs) for this repo live as Markdown files in `.scratch/`.
+Implementation issues for this repository live in [GitHub Issues](https://github.com/barnabyg/InsightForge/issues). Durable product specifications live in the repository under `docs/product/`; do not maintain duplicate local ticket files.
 
 ## Conventions
 
-- One feature per directory: `.scratch/<feature-slug>/`
-- The spec is `.scratch/<feature-slug>/spec.md`
-- Implementation issues are one file per ticket at `.scratch/<feature-slug>/issues/<NN>-<slug>.md`, numbered from `01`; never use one combined tickets file
-- Triage state is recorded as a `Status:` line near the top of an issue file
-- Comments and conversation history append under a `## Comments` heading
+- Use one GitHub issue per independently testable vertical slice.
+- Associate MVP work with the [InsightForge MVP milestone](https://github.com/barnabyg/InsightForge/milestone/1).
+- Record the outcome, specification link, dependencies, and testable acceptance criteria in the issue body.
+- Express dependencies with GitHub issue references such as `Blocked by #4`.
+- Use the canonical triage labels documented in `docs/agents/triage-labels.md`.
+- Use the `feature` label for product functionality and `in-progress` while an issue is claimed.
+- Treat issue comments as the implementation history; do not copy that history into repository Markdown.
 
-## Publishing
+## Finding the next ticket
 
-When a skill says to publish to the issue tracker, create a new file under `.scratch/<feature-slug>/`, creating the directory if needed.
+The frontier is the lowest-numbered open issue in the active milestone that:
 
-When a skill says to fetch a ticket, read the referenced local Markdown file.
+1. has the `ready-for-agent` label;
+2. has no open issue named in its `Blocked by` section; and
+3. is not already labelled `in-progress`.
 
-## Wayfinding
+Inspect the full issue body and every linked dependency before starting work.
 
-- Map: `.scratch/<effort>/map.md`
-- Child ticket: `.scratch/<effort>/issues/NN-<slug>.md`
-- A child ticket records `Type:`, `Status:`, and optional `Blocked by:` lines
-- The frontier is the lowest-numbered open, unblocked, unclaimed child ticket
-- Claim by setting `Status: claimed` before work
-- Resolve by appending an `## Answer`, setting `Status: resolved`, and adding a context pointer to the map
+## Claiming and resolving
+
+1. Claim an issue by replacing `ready-for-agent` with `in-progress` before changing code.
+2. Implement and verify only that issue's scope.
+3. Create one focused commit for the issue and reference it in the commit subject, for example `feat: generate concept screens (#5)`.
+4. Push the commit, add a completion comment containing the commit link and verification results, remove `in-progress`, then close the issue as completed.
+5. If work is abandoned, remove `in-progress` and restore the appropriate triage label.
+
+Do not combine unrelated issues into one commit. Review findings that require independent fixes should likewise receive one focused commit per finding.

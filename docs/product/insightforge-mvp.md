@@ -1,5 +1,3 @@
-Status: ready-for-agent
-
 # InsightForge MVP
 
 ## Problem Statement

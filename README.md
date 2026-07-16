@@ -2,7 +2,7 @@
 
 InsightForge is a local workflow application for turning a product insight into a Design Brief, three Concept Screens, and a PRD. Generated artifacts are read-only; iteration happens by improving the shared prompts and rerunning a consistent workflow.
 
-The product definition is in [the MVP specification](.scratch/insightforge-mvp/spec.md), and implementation work is tracked in [the local ticket map](.scratch/insightforge-mvp/map.md).
+The product definition is in [the MVP specification](docs/product/insightforge-mvp.md), and implementation work is tracked in the [InsightForge MVP milestone](https://github.com/barnabyg/InsightForge/milestone/1).
 
 ## Development
 

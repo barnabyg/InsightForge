@@ -1,13 +1,13 @@
 # Triage Labels
 
-The engineering skills use five canonical triage roles. Local Markdown issues record the corresponding value in their `Status:` line.
+The engineering skills use five canonical triage roles, represented directly by labels on GitHub Issues.
 
-| Canonical role | Local status | Meaning |
-| --- | --- | --- |
-| `needs-triage` | `needs-triage` | Maintainer needs to evaluate this issue |
-| `needs-info` | `needs-info` | Waiting for more information |
-| `ready-for-agent` | `ready-for-agent` | Fully specified and ready for an agent |
-| `ready-for-human` | `ready-for-human` | Requires human implementation |
-| `wontfix` | `wontfix` | Will not be actioned |
+| GitHub label | Meaning |
+| --- | --- |
+| `needs-triage` | Maintainer needs to evaluate this issue |
+| `needs-info` | Waiting for more information |
+| `ready-for-agent` | Fully specified and ready for an agent |
+| `ready-for-human` | Requires human implementation |
+| `wontfix` | Will not be actioned |
 
-When a skill names a canonical role, use the matching local status from this table.
+`in-progress` is a workflow label rather than a triage role. Replace `ready-for-agent` with `in-progress` when claiming a ticket, and restore a triage label if the ticket is released without completion.
