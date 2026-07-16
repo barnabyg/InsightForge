@@ -1,7 +1,7 @@
-import type { TokenUsage } from '../shared/generation.js';
+import type { ConceptScreenOrdinal, TokenUsage } from '../shared/generation.js';
 import type { ImageQuality } from '../shared/workflow-configuration.js';
 
-export type ConceptScreenOrdinal = 1 | 2 | 3;
+export type { ConceptScreenOrdinal } from '../shared/generation.js';
 
 export interface ConceptScreenReference {
   ordinal: ConceptScreenOrdinal;

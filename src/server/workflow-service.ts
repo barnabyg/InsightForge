@@ -7,6 +7,7 @@ import { PNG } from 'pngjs';
 import type {
   ArtifactValidation,
   ConceptScreenOperation,
+  ConceptScreenOrdinal,
   ConceptScreenRun,
   ConceptScreenSetArtifact,
   ConceptScreenValidation,
@@ -81,7 +82,7 @@ interface ConceptArtifactRow {
 }
 
 interface ConceptOperationRow {
-  ordinal: 1 | 2 | 3;
+  ordinal: ConceptScreenOrdinal;
   status: 'running' | 'succeeded' | 'failed';
   started_at: string;
   completed_at: string | null;
@@ -685,7 +686,7 @@ export async function openWorkflowService(
         );
       }
       const completed: Array<{
-        ordinal: 1 | 2 | 3;
+        ordinal: ConceptScreenOrdinal;
         assetId: string;
         png: Buffer;
         width: number;

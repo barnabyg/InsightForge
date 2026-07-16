@@ -1,4 +1,5 @@
 import { PNG } from 'pngjs';
+import type { ConceptScreenOrdinal } from '../shared/generation.js';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 
@@ -16,7 +17,7 @@ function fill(image: PNG, x: number, y: number, width: number, height: number, c
   }
 }
 
-function renderMockScreen(ordinal: 1 | 2 | 3): Buffer {
+function renderMockScreen(ordinal: ConceptScreenOrdinal): Buffer {
   const image = new PNG({ width: 1024, height: 768 });
   fill(image, 0, 0, 1024, 768, [247, 244, 236, 255]);
   fill(image, 0, 0, 210, 768, [31, 35, 53, 255]);

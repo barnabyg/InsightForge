@@ -4,6 +4,8 @@ export interface TokenUsage {
   totalTokens: number;
 }
 
+export type ConceptScreenOrdinal = 1 | 2 | 3;
+
 export interface ConceptScreenValidation {
   status: 'valid' | 'valid_with_warnings';
   screenCount: number;
@@ -17,7 +19,7 @@ export interface ConceptScreenValidation {
 
 export interface ConceptScreen {
   assetId: string;
-  ordinal: 1 | 2 | 3;
+  ordinal: ConceptScreenOrdinal;
   width: number;
   height: number;
   byteSize: number;
@@ -39,7 +41,7 @@ export interface ConceptScreenSetArtifact {
 }
 
 export interface ConceptScreenOperation {
-  ordinal: 1 | 2 | 3;
+  ordinal: ConceptScreenOrdinal;
   status: 'running' | 'succeeded' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt: string | null;
