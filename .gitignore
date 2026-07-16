@@ -1,0 +1,22 @@
+# Dependencies and build output
+node_modules/
+dist/
+coverage/
+
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.log
+
+# InsightForge local application data
+.data/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
+
+# Editor and operating-system files
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
