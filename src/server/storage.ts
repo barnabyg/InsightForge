@@ -45,6 +45,16 @@ export async function initializeStorage(
       INSERT INTO app_metadata (key, value)
       VALUES ('schema_version', '1')
       ON CONFLICT(key) DO NOTHING;
+
+      CREATE TABLE IF NOT EXISTS projects (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        insight_source TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        name_is_automatic INTEGER NOT NULL DEFAULT 1
+          CHECK (name_is_automatic IN (0, 1))
+      );
     `);
   } finally {
     database.close();

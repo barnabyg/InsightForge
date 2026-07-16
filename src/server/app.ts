@@ -5,7 +5,9 @@ import type { CompletedConnectivityState } from './connectivity.js';
 import { registerBootstrapRoutes } from './bootstrap-routes.js';
 import { createConnectivityMonitor } from './connectivity-monitor.js';
 import { registerLocalAccess } from './local-access.js';
-import { defaultDataDirectory, initializeStorage } from './storage.js';
+import { openProjectService } from './project-service.js';
+import { registerProjectRoutes } from './project-routes.js';
+import { defaultDataDirectory } from './storage.js';
 import { registerWebShell } from './web-shell.js';
 import type { ApplicationMode } from '../shared/bootstrap.js';
 
@@ -38,9 +40,11 @@ export async function buildApp(
   );
   const now = options.now ?? (() => new Date());
   const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
-  const storage = await initializeStorage(
+  const projectService = await openProjectService(
     options.dataDirectory ?? defaultDataDirectory(),
+    { now },
   );
+  const storage = { state: 'ready' as const };
   const connectivity = createConnectivityMonitor(
     { mode, apiKey, now },
     options.checkOpenAI,
@@ -49,9 +53,13 @@ export async function buildApp(
   app.addHook('onReady', () => {
     connectivity.start();
   });
+  app.addHook('onClose', () => {
+    projectService.close();
+  });
 
   registerLocalAccess(app);
   registerBootstrapRoutes(app, { mode, storage, connectivity });
+  registerProjectRoutes(app, projectService);
 
   const webRoot = options.webRoot ?? join(process.cwd(), 'dist');
   if (await isDirectory(webRoot)) {
