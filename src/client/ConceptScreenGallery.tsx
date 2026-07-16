@@ -15,6 +15,11 @@ function fileName(projectName: string, ordinal: number): string {
 
 export function ConceptScreenGallery({ artifact, projectName }: ConceptScreenGalleryProps) {
   const [focused, setFocused] = useState<ConceptScreen | null>(null);
+  const [zoom, setZoom] = useState(100);
+  function focusScreen(screen: ConceptScreen): void {
+    setZoom(100);
+    setFocused(screen);
+  }
   return (
     <>
       <article className={styles['concept-gallery']} aria-label="Concept Screen Set">
@@ -32,7 +37,7 @@ export function ConceptScreenGallery({ artifact, projectName }: ConceptScreenGal
                 className={styles['concept-image-button']}
                 type="button"
                 aria-label={`Inspect Concept Screen ${screen.ordinal}`}
-                onClick={() => setFocused(screen)}
+                onClick={() => focusScreen(screen)}
               >
                 <img
                   src={screen.downloadUrl}
@@ -64,13 +69,22 @@ export function ConceptScreenGallery({ artifact, projectName }: ConceptScreenGal
           onDismiss={() => setFocused(null)}
           actions={<button className={styles['primary-action']} type="button" onClick={() => setFocused(null)}>Close</button>}
         >
-          <img
-            className={styles['concept-focus-image']}
-            src={focused.downloadUrl}
-            alt={`Concept Screen ${focused.ordinal}`}
-            width={focused.width}
-            height={focused.height}
-          />
+          <div className={styles['concept-focus-toolbar']} aria-label="Zoom controls">
+            <button type="button" disabled={zoom === 100} onClick={() => setZoom((value) => Math.max(100, value - 25))}>Zoom out</button>
+            <output aria-live="polite">{zoom}%</output>
+            <button type="button" disabled={zoom === 200} onClick={() => setZoom((value) => Math.min(200, value + 25))}>Zoom in</button>
+            <button type="button" disabled={zoom === 100} onClick={() => setZoom(100)}>Reset zoom</button>
+          </div>
+          <div className={styles['concept-focus-viewport']}>
+            <img
+              className={styles['concept-focus-image']}
+              src={focused.downloadUrl}
+              alt={`Concept Screen ${focused.ordinal}`}
+              width={focused.width}
+              height={focused.height}
+              style={{ width: `${zoom}%` }}
+            />
+          </div>
           <p className={styles['concept-focus-meta']}>
             Read-only PNG · {focused.width} × {focused.height} · generated as part of one coordinated set.
           </p>

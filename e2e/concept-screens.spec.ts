@@ -39,6 +39,11 @@ test('Author generates and inspects a persisted coordinated Concept Screen Set',
   await gallery.getByRole('button', { name: 'Inspect Concept Screen 1' }).click();
   const focus = page.getByRole('dialog', { name: 'Concept Screen 1' });
   await expect(focus.getByRole('img', { name: 'Concept Screen 1' })).toBeVisible();
+  await expect(focus.getByText('100%')).toBeVisible();
+  await focus.getByRole('button', { name: 'Zoom in' }).click();
+  await expect(focus.getByText('125%')).toBeVisible();
+  await focus.getByRole('button', { name: 'Reset zoom' }).click();
+  await expect(focus.getByText('100%')).toBeVisible();
   await focus.getByRole('button', { name: 'Close' }).click();
 
   await page.reload();

@@ -2044,10 +2044,41 @@ a {
 }
 
 .concept-focus-image {
-  width: min(100%, 1100px);
+  max-width: none;
   height: auto;
   display: block;
+}
+
+.concept-focus-viewport {
+  max-height: 62vh;
+  overflow: auto;
   border: 1px solid var(--line);
+}
+
+.concept-focus-toolbar {
+  margin-bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.concept-focus-toolbar button {
+  padding: 6px 9px;
+  border: 1px solid var(--line-strong);
+  background: #fff;
+  color: var(--ink);
+  font-size: 9px;
+}
+
+.concept-focus-toolbar button:disabled {
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.concept-focus-toolbar output {
+  min-width: 38px;
+  font-size: 10px;
+  text-align: center;
 }
 
 .concept-focus-meta {
