@@ -43,6 +43,9 @@ export function ConceptScreenRunInspector({
   const progressElapsedSeconds = progress
     ? Math.floor(progress.elapsedMs / 1_000)
     : elapsedSeconds;
+  const progressDetail = progress?.phase === 'generating' || !progress
+    ? `Screen ${nextOrdinal} of 3 · ${progress?.completedOperationCount ?? run?.completedOperationCount ?? 0} complete`
+    : `${progress.completedOperationCount} of 3 complete`;
   return (
     <aside className={styles['run-inspector']} aria-label="Run Inspector">
       <div className={styles['inspector-heading']}>
@@ -54,7 +57,7 @@ export function ConceptScreenRunInspector({
         <div className={styles['run-progress']} role="status" aria-label="Generating Concept Screens">
           <span className={styles['progress-spinner']} aria-hidden="true" />
           <strong>{progressLabel}</strong>
-          <span>{progress?.completedOperationCount ?? run?.completedOperationCount ?? 0} of 3 complete · {progressElapsedSeconds}s elapsed</span>
+          <span>{progressDetail} · {progressElapsedSeconds}s elapsed</span>
         </div>
       )}
 
