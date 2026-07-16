@@ -1,12 +1,28 @@
 import type { FastifyInstance } from 'fastify';
 
+const loopbackHostnames = new Set(['localhost', '127.0.0.1', '::1']);
+
+function isLoopbackHostname(hostname: string): boolean {
+  const normalized = hostname.toLowerCase().replace(/^\[|\]$/g, '');
+  return loopbackHostnames.has(normalized);
+}
+
 function isLocalHost(host: string | undefined): boolean {
   if (!host) {
     return false;
   }
 
-  return /^(localhost|127\.0\.0\.1)(:\d+)?$/i.test(host)
-    || /^\[::1\](?::\d+)?$/i.test(host);
+  try {
+    const url = new URL(`http://${host}`);
+    return url.username === ''
+      && url.password === ''
+      && url.pathname === '/'
+      && url.search === ''
+      && url.hash === ''
+      && isLoopbackHostname(url.hostname);
+  } catch {
+    return false;
+  }
 }
 function isLocalOrigin(origin: string | undefined): boolean {
   if (!origin) {
@@ -15,10 +31,7 @@ function isLocalOrigin(origin: string | undefined): boolean {
 
   try {
     const url = new URL(origin);
-    return url.protocol === 'http:'
-      && (url.hostname === 'localhost'
-        || url.hostname === '127.0.0.1'
-        || url.hostname === '[::1]');
+    return url.protocol === 'http:' && isLoopbackHostname(url.hostname);
   } catch {
     return false;
   }

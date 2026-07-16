@@ -19,7 +19,17 @@ function formatCheckTime(checkedAt: string): string {
     hour12: false,
   }).format(new Date(checkedAt));
 }
-export function ConnectivityIndicator({ shell }: { shell: ShellState }) {
+export interface ConnectivityIndicatorProps {
+  shell: ShellState;
+  refreshing: boolean;
+  onRefresh(): Promise<void>;
+}
+
+export function ConnectivityIndicator({
+  shell,
+  refreshing,
+  onRefresh,
+}: ConnectivityIndicatorProps) {
   const labels = presentation[shell.connectivity];
 
   return (
@@ -37,9 +47,23 @@ export function ConnectivityIndicator({ shell }: { shell: ShellState }) {
       {shell.checkedAt && (
         <span className={styles['last-check']}>
           <span>Last checked</span>
-          <time dateTime={shell.checkedAt}>{formatCheckTime(shell.checkedAt)}</time>
+          <time
+            dateTime={shell.checkedAt}
+            aria-label={`Last checked at ${formatCheckTime(shell.checkedAt)}`}
+          >
+            {formatCheckTime(shell.checkedAt)}
+          </time>
         </span>
       )}
+      <button
+        className={styles['refresh-connectivity']}
+        type="button"
+        aria-label="Refresh OpenAI connectivity"
+        disabled={refreshing || shell.connectivity === 'checking'}
+        onClick={() => void onRefresh()}
+      >
+        Refresh
+      </button>
     </div>
   );
 }

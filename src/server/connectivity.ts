@@ -15,6 +15,14 @@ export interface ConnectivityProbeOptions {
   now: () => Date;
 }
 
+export function unavailableConnectivity(now: () => Date): CompletedConnectivityState {
+  return {
+    state: 'unavailable',
+    checkedAt: now().toISOString(),
+    message: 'OpenAI could not be reached',
+  };
+}
+
 export function connectivityAtStartup({
   mode,
   apiKey,
@@ -67,10 +75,6 @@ export async function checkConnectivity({
       message: 'OpenAI is reachable',
     };
   } catch {
-    return {
-      state: 'unavailable',
-      checkedAt: now().toISOString(),
-      message: 'OpenAI could not be reached',
-    };
+    return unavailableConnectivity(now);
   }
 }

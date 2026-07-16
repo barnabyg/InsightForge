@@ -41,8 +41,15 @@ By default, application data is stored in the current user's operating-system ap
 
 ## Verification
 
+Install the Playwright browser once on a development machine:
+
+```powershell
+npx playwright install chromium
+```
+
 ```powershell
 npm test
+npm run test:e2e
 npm run typecheck
 npm run build
 ```

@@ -2,12 +2,14 @@ import type { ConnectivityState } from '../shared/bootstrap.js';
 import {
   checkConnectivity,
   connectivityAtStartup,
+  unavailableConnectivity,
   type CompletedConnectivityState,
   type ConnectivityProbeOptions,
 } from './connectivity.js';
 
 export interface ConnectivityMonitor {
   current(): ConnectivityState;
+  refresh(): Promise<ConnectivityState>;
   start(): void;
   waitForResult(): Promise<ConnectivityState>;
 }
@@ -30,11 +32,7 @@ export function createConnectivityMonitor(
           return state;
         })
         .catch(() => {
-          state = {
-            state: 'unavailable',
-            checkedAt: options.now().toISOString(),
-            message: 'OpenAI could not be reached',
-          };
+          state = unavailableConnectivity(options.now);
           return state;
         });
     }
@@ -44,6 +42,14 @@ export function createConnectivityMonitor(
 
   return {
     current: () => state,
+    refresh: () => {
+      if (state.state === 'checking' && inFlight) {
+        return inFlight;
+      }
+      state = connectivityAtStartup(options);
+      inFlight = undefined;
+      return waitForResult();
+    },
     start: () => {
       void waitForResult();
     },

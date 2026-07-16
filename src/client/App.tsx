@@ -14,7 +14,7 @@ function classes(...names: string[]): string {
 }
 
 export function App() {
-  const shell = useBootstrap();
+  const { shell, refreshConnectivity, refreshing } = useBootstrap();
 
   return (
     <div className={classes('app-frame')}>
@@ -23,7 +23,11 @@ export function App() {
           <span className={classes('brand-mark')} aria-hidden="true">IF</span>
           <span>InsightForge</span>
         </a>
-        <ConnectivityIndicator shell={shell} />
+        <ConnectivityIndicator
+          shell={shell}
+          refreshing={refreshing}
+          onRefresh={refreshConnectivity}
+        />
       </header>
 
       <div className={classes('workspace')}>
@@ -45,7 +49,7 @@ export function App() {
             <span className={classes('local-note-icon')} aria-hidden="true">⌂</span>
             <div>
               <strong>Local workspace</strong>
-              <span>Your work stays on this device</span>
+              <span>Project data is stored locally</span>
             </div>
           </div>
         </aside>
@@ -58,6 +62,16 @@ export function App() {
               Shape the prompts. Run the workflow. Refine the thinking behind every artifact.
             </p>
           </section>
+
+          <aside className={classes('privacy-notice')} aria-label="Privacy and OpenAI boundary">
+            <span className={classes('privacy-mark')} aria-hidden="true">◎</span>
+            <div>
+              <strong>Projects stay on this device.</strong>
+              <p>
+                When you generate, only the assembled prompt and required stage inputs are sent to OpenAI.
+              </p>
+            </div>
+          </aside>
 
           <section className={classes('pipeline')} aria-labelledby="pipeline-title">
             <div className={classes('section-heading')}>

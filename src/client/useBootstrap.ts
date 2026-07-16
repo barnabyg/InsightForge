@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import type {
   ApplicationMode,
   BootstrapResponse,
@@ -11,6 +11,12 @@ export interface ShellState {
   connectivity: ConnectivityStatus;
   message: string;
   checkedAt: string | null;
+}
+
+export interface BootstrapController {
+  shell: ShellState;
+  refreshConnectivity(): Promise<void>;
+  refreshing: boolean;
 }
 const initialState: ShellState = {
   mode: null,
@@ -31,8 +37,9 @@ function shellState(
   };
 }
 
-export function useBootstrap(): ShellState {
+export function useBootstrap(): BootstrapController {
   const [state, setState] = useState<ShellState>(initialState);
+  const [refreshing, setRefreshing] = useState(false);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -75,5 +82,33 @@ export function useBootstrap(): ShellState {
     return () => controller.abort();
   }, []);
 
-  return state;
+  const refreshConnectivity = useCallback(async () => {
+    setRefreshing(true);
+    setState((current) => ({
+      ...current,
+      connectivity: 'checking',
+      message: 'Checking OpenAI connectivity',
+      checkedAt: null,
+    }));
+
+    try {
+      const response = await fetch('/api/connectivity/refresh', { method: 'POST' });
+      if (!response.ok) {
+        throw new Error(`Connectivity refresh failed with status ${response.status}`);
+      }
+      const connectivity = await response.json() as ConnectivityState;
+      setState((current) => shellState(current.mode ?? 'live', connectivity));
+    } catch {
+      setState((current) => ({
+        ...current,
+        connectivity: 'unavailable',
+        message: 'The local InsightForge server could not be reached',
+        checkedAt: null,
+      }));
+    } finally {
+      setRefreshing(false);
+    }
+  }, []);
+
+  return { shell: state, refreshConnectivity, refreshing };
 }

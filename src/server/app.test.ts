@@ -189,4 +189,61 @@ describe('local application bootstrap', () => {
 
     await app.close();
   });
+
+  it('rechecks OpenAI only when the browser requests a manual refresh', async () => {
+    const dataDirectory = await createTemporaryDataDirectory();
+    const probeResults = [
+      {
+        state: 'unavailable' as const,
+        checkedAt: '2026-07-16T11:00:00.000Z',
+        message: 'OpenAI could not be reached',
+      },
+      {
+        state: 'connected' as const,
+        checkedAt: '2026-07-16T11:05:00.000Z',
+        message: 'OpenAI is reachable',
+      },
+    ];
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'live',
+      apiKey: 'test-key',
+      checkOpenAI: async () => {
+        const result = probeResults.shift();
+        if (!result) {
+          throw new Error('Unexpected connectivity probe');
+        }
+        return result;
+      },
+    });
+    await app.ready();
+
+    const initial = await app.inject({
+      method: 'GET',
+      url: '/api/connectivity',
+      headers: { host: 'localhost:4317' },
+    });
+    expect(initial.json().state).toBe('unavailable');
+
+    const refreshed = await app.inject({
+      method: 'POST',
+      url: '/api/connectivity/refresh',
+      headers: { host: 'localhost:4317' },
+    });
+    expect(refreshed.statusCode).toBe(200);
+    expect(refreshed.json()).toEqual({
+      state: 'connected',
+      checkedAt: '2026-07-16T11:05:00.000Z',
+      message: 'OpenAI is reachable',
+    });
+
+    const bootstrap = await app.inject({
+      method: 'GET',
+      url: '/api/bootstrap',
+      headers: { host: 'localhost:4317' },
+    });
+    expect(bootstrap.json().connectivity.state).toBe('connected');
+
+    await app.close();
+  });
 });

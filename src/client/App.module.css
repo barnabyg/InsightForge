@@ -144,6 +144,27 @@ a {
   font-variant-numeric: tabular-nums;
 }
 
+.refresh-connectivity {
+  padding: 5px 8px;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  color: var(--ink);
+  background: rgb(255 255 255 / 46%);
+  font: inherit;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.refresh-connectivity:hover:not(:disabled) {
+  border-color: #9da5ce;
+  background: #eef0f8;
+}
+
+.refresh-connectivity:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
 .workspace {
   min-height: calc(100vh - 76px);
   display: grid;
@@ -226,7 +247,7 @@ a {
 
 .hero {
   max-width: 780px;
-  margin-bottom: 72px;
+  margin-bottom: 42px;
 }
 
 .hero h1 {
@@ -245,6 +266,36 @@ a {
   color: var(--muted);
   font-size: 17px;
   line-height: 1.65;
+}
+
+.privacy-notice {
+  max-width: 780px;
+  margin-bottom: 64px;
+  padding: 18px 20px;
+  display: flex;
+  align-items: flex-start;
+  gap: 14px;
+  border: 1px solid #c9cde0;
+  background: rgb(255 255 255 / 42%);
+}
+
+.privacy-mark {
+  color: var(--accent);
+  font-size: 20px;
+  line-height: 1;
+}
+
+.privacy-notice strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+
+.privacy-notice p {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.55;
 }
 
 .pipeline {
@@ -371,6 +422,10 @@ a {
 
   .last-check {
     padding-left: 8px;
+  }
+
+  .last-check > span {
+    display: none;
   }
 
   .workspace {
