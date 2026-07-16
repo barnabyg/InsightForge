@@ -63,6 +63,15 @@ export interface ConceptScreenOperation {
   error: { code: string; message: string } | null;
 }
 
+export interface ConceptScreenAttemptHistory {
+  status: 'failed' | 'cancelled';
+  completedAt: string | null;
+  durationMs: number | null;
+  usage: TokenUsage | null;
+  error: { code: string; message: string } | null;
+  operations: ConceptScreenOperation[];
+}
+
 export interface ConceptScreenRun {
   id: string;
   projectId: string;
@@ -84,6 +93,7 @@ export interface ConceptScreenRun {
   assembledRequest: string;
   completedOperationCount: number;
   operations: ConceptScreenOperation[];
+  attemptHistory: ConceptScreenAttemptHistory[];
   usage: TokenUsage | null;
   validation: ConceptScreenValidation | null;
   error: { code: string; message: string } | null;

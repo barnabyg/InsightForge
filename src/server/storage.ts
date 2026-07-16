@@ -97,6 +97,7 @@ export async function initializeStorage(
         input_run_id TEXT,
         assembled_request TEXT NOT NULL,
         settings_json TEXT,
+        attempt_history_json TEXT,
         response_id TEXT,
         request_id TEXT,
         usage_json TEXT,
@@ -168,6 +169,9 @@ export async function initializeStorage(
     }
     if (!stageRunColumns.some(({ name }) => name === 'input_run_id')) {
       database.exec('ALTER TABLE stage_runs ADD COLUMN input_run_id TEXT;');
+    }
+    if (!stageRunColumns.some(({ name }) => name === 'attempt_history_json')) {
+      database.exec('ALTER TABLE stage_runs ADD COLUMN attempt_history_json TEXT;');
     }
 
     const insertDefault = database.prepare(`

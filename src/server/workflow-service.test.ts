@@ -304,6 +304,8 @@ describe('Workflow service', () => {
     let screenTwoAttempts = 0;
     let currentTime = Date.parse('2026-07-16T12:00:00.000Z');
     const pngs = [pngFixture(30), pngFixture(60), pngFixture(90)];
+    const mismatched = new PNG({ width: 768, height: 1024 });
+    mismatched.data.fill(110);
     const workflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
         async generateDesignBrief() {
@@ -320,11 +322,12 @@ describe('Workflow service', () => {
           calls.push(input.ordinal);
           currentTime += 1_000;
           if (input.ordinal === 2 && screenTwoAttempts++ === 0) {
-            throw new GenerationBoundaryError(
-              'openai_request_failed',
-              'OpenAI could not generate Concept Screen 2.',
-              { requestId: 'req_screen_2_failed' },
-            );
+            return {
+              png: PNG.sync.write(mismatched),
+              requestId: 'req_screen_2_failed',
+              responseId: null,
+              usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+            };
           }
           return {
             png: pngs[input.ordinal - 1],
@@ -340,7 +343,7 @@ describe('Workflow service', () => {
     await workflows.generateDesignBrief(project.id);
 
     await expect(workflows.generateConceptScreens(project.id)).rejects.toMatchObject({
-      code: 'openai_request_failed',
+      code: 'invalid_artifact',
     });
     const failed = workflows.getProjectWorkflow(project.id);
     expect(failed.conceptScreenSet).toBeNull();
@@ -363,7 +366,16 @@ describe('Workflow service', () => {
       status: 'succeeded',
       durationMs: 4_000,
       completedOperationCount: 3,
-      usage: { inputTokens: 300, outputTokens: 600, totalTokens: 900 },
+      usage: { inputTokens: 400, outputTokens: 800, totalTokens: 1200 },
+      attemptHistory: [{
+        status: 'failed',
+        usage: { inputTokens: 200, outputTokens: 400, totalTokens: 600 },
+        error: { code: 'invalid_artifact' },
+        operations: [
+          { ordinal: 1, status: 'succeeded' },
+          { ordinal: 2, status: 'failed', requestId: 'req_screen_2_failed' },
+        ],
+      }],
     });
     expect(resumed.conceptScreenSet?.screens).toHaveLength(3);
   });

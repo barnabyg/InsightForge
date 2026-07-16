@@ -9,6 +9,7 @@ import type {
   ConceptScreenOperation,
   ConceptScreenOrdinal,
   ConceptScreenProgressEvent,
+  ConceptScreenAttemptHistory,
   ConceptScreenRun,
   ConceptScreenSetArtifact,
   ConceptScreenValidation,
@@ -68,6 +69,7 @@ interface RunRow {
   input_run_id: string | null;
   assembled_request: string;
   settings_json: string | null;
+  attempt_history_json: string | null;
   response_id: string | null;
   request_id: string | null;
   usage_json: string | null;
@@ -310,6 +312,7 @@ function conceptRunFromRows(
     assembledRequest: row.assembled_request,
     completedOperationCount: operations.filter(({ status }) => status === 'succeeded').length,
     operations: operations.map(conceptOperationFromRow),
+    attemptHistory: readJson<ConceptScreenAttemptHistory[]>(row.attempt_history_json) ?? [],
     usage: readJson<TokenUsage>(row.usage_json),
     validation: readJson<ConceptScreenValidation>(row.validation_json),
     error: row.error_code && row.error_message
@@ -716,12 +719,30 @@ export async function openWorkflowService(
       const attemptStartedAt = now();
       const priorDurationMs = resumableRun?.duration_ms ?? 0;
       if (resumableRun) {
+        const priorHistory = readJson<ConceptScreenAttemptHistory[]>(
+          resumableRun.attempt_history_json,
+        ) ?? [];
+        const archivedAttempt: ConceptScreenAttemptHistory = {
+          status: resumableRun.error_code === 'cancelled' ? 'cancelled' : 'failed',
+          completedAt: resumableRun.completed_at,
+          durationMs: resumableRun.duration_ms,
+          usage: readJson<TokenUsage>(resumableRun.usage_json),
+          error: resumableRun.error_code && resumableRun.error_message
+            ? { code: resumableRun.error_code, message: resumableRun.error_message }
+            : null,
+          operations: conceptOperations(runId).map(conceptOperationFromRow),
+        };
         database.prepare(`
           UPDATE stage_runs
           SET status = 'running', completed_at = NULL, duration_ms = ?,
-              validation_json = NULL, error_code = NULL, error_message = NULL
+              validation_json = NULL, error_code = NULL, error_message = NULL,
+              attempt_history_json = ?
           WHERE id = ?
-        `).run(priorDurationMs, runId);
+        `).run(
+          priorDurationMs,
+          JSON.stringify([...priorHistory, archivedAttempt]),
+          runId,
+        );
       } else {
         database.prepare(`
           INSERT INTO stage_runs (
@@ -759,20 +780,17 @@ export async function openWorkflowService(
           width: operation.width!,
           height: operation.height!,
         }));
-      let totalUsage: TokenUsage = conceptOperations(runId)
-        .filter((operation) => operation.status === 'succeeded')
-        .reduce((total, operation) => addUsage(
-          total,
-          readJson<TokenUsage>(operation.usage_json) ?? {
-            inputTokens: 0,
-            outputTokens: 0,
-            totalTokens: 0,
-          },
-        ), {
+      let totalUsage: TokenUsage = resumableRun
+        ? readJson<TokenUsage>(resumableRun.usage_json) ?? {
+          inputTokens: 0,
+          outputTokens: 0,
+          totalTokens: 0,
+        }
+        : {
         inputTokens: 0,
         outputTokens: 0,
         totalTokens: 0,
-      });
+      };
       activeConceptRuns.set(projectId, { runId, cancelRequested: false });
       let activeOperationIdentifiers: {
         requestId: string | null;

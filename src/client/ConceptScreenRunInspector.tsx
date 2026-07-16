@@ -104,6 +104,28 @@ export function ConceptScreenRunInspector({
             </ol>
           </section>
 
+          {run.attemptHistory.length > 0 && (
+            <section className={styles['inspector-section']} aria-label="Prior generation attempts">
+              <h3>Prior generation attempts</h3>
+              <ol className={styles['operation-list']}>
+                {run.attemptHistory.map((attempt, index) => (
+                  <li key={`${attempt.completedAt ?? 'attempt'}-${index}`}>
+                    <div><strong>Attempt {index + 1}</strong><span>{statusLabel(attempt.status)}</span></div>
+                    <small>{formatDuration(attempt.durationMs)} · {attempt.operations.length} recorded operations</small>
+                    {attempt.error && <code>{attempt.error.code}: {attempt.error.message}</code>}
+                    {attempt.operations.map((operation) => (
+                      <small key={`${index}-${operation.ordinal}`}>
+                        Screen {operation.ordinal} · {statusLabel(operation.status)}
+                        {operation.requestId ? ` · ${operation.requestId}` : ''}
+                        {operation.usage ? ` · ${operation.usage.totalTokens} tokens` : ''}
+                      </small>
+                    ))}
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
           {run.usage && (
             <section className={styles['inspector-section']} aria-label="Token usage">
               <h3>Usage</h3>
