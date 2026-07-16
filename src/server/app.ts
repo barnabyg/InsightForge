@@ -3,16 +3,25 @@ import { join } from 'node:path';
 import Fastify, { type FastifyInstance } from 'fastify';
 import type { CompletedConnectivityState } from './connectivity.js';
 import type { CompatibleModels } from './model-discovery.js';
+import type { TextGenerationBoundary } from '../shared/generation.js';
 import { registerBootstrapRoutes } from './bootstrap-routes.js';
 import { createConnectivityMonitor } from './connectivity-monitor.js';
 import { registerLocalAccess } from './local-access.js';
 import { openModelCatalogService } from './model-catalog-service.js';
+import { createMockTextGeneration } from './mock-text-generation.js';
+import { createOpenAITextGeneration } from './openai-text-generation.js';
+import { GenerationBoundaryError } from './generation-boundary.js';
 import { openProjectService } from './project-service.js';
 import { registerProjectRoutes } from './project-routes.js';
 import { defaultDataDirectory } from './storage.js';
 import { registerWebShell } from './web-shell.js';
 import { openWorkflowConfigurationService } from './workflow-configuration-service.js';
 import { registerWorkflowConfigurationRoutes } from './workflow-configuration-routes.js';
+import {
+  openWorkflowService,
+  WorkflowGenerationError,
+} from './workflow-service.js';
+import { registerWorkflowRoutes } from './workflow-routes.js';
 import type { ApplicationMode } from '../shared/bootstrap.js';
 
 export interface BuildAppOptions {
@@ -22,6 +31,7 @@ export interface BuildAppOptions {
   now?: () => Date;
   checkOpenAI?: () => Promise<CompletedConnectivityState>;
   discoverModels?: () => Promise<CompatibleModels>;
+  textGeneration?: TextGenerationBoundary;
   webRoot?: string;
   logger?: boolean;
 }
@@ -60,6 +70,23 @@ export async function buildApp(
     now,
     discoverModels: options.discoverModels,
   });
+  const textGeneration = options.textGeneration
+    ?? (mode === 'mock'
+      ? createMockTextGeneration({ delayMs: 350 })
+      : apiKey
+        ? createOpenAITextGeneration(apiKey)
+        : {
+            async generateDesignBrief() {
+              throw new GenerationBoundaryError(
+                'api_key_missing',
+                'Set OPENAI_API_KEY to enable generation.',
+              );
+            },
+          });
+  const workflowService = await openWorkflowService(dataDirectory, {
+    now,
+    textGeneration,
+  });
   const storage = { state: 'ready' as const };
   const connectivity = createConnectivityMonitor(
     { mode, apiKey, now },
@@ -73,6 +100,7 @@ export async function buildApp(
     projectService.close();
     workflowConfiguration.close();
     modelCatalog.close();
+    workflowService.close();
   });
 
   registerLocalAccess(app);
@@ -83,6 +111,19 @@ export async function buildApp(
     workflowConfiguration,
     modelCatalog,
   );
+  registerWorkflowRoutes(app, workflowService, {
+    beforeGeneration: async () => {
+      const state = await connectivity.refresh();
+      if (state.state !== 'connected') {
+        throw new WorkflowGenerationError(
+          state.state === 'api_key_missing'
+            ? 'api_key_missing'
+            : 'openai_unavailable',
+          state.message,
+        );
+      }
+    },
+  });
 
   const webRoot = options.webRoot ?? join(process.cwd(), 'dist');
   if (await isDirectory(webRoot)) {

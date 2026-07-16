@@ -18,7 +18,7 @@ const incompatibleTextMarkers = [
 
 export function isCompatibleTextModel(modelId: string): boolean {
   const lower = modelId.toLowerCase();
-  const supportedFamily = /^gpt-(?:3\.5|4o?|5)(?:[.-]|$)/.test(lower)
+  const supportedFamily = /^gpt-(?:4o(?:[.-]|$)|4\.(?:1|5)(?:[.-]|$)|5(?:[.-]|$))/.test(lower)
     || /^o[134](?:-|$)/.test(lower);
   return supportedFamily
     && !incompatibleTextMarkers.some((marker) => lower.includes(marker));

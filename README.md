@@ -37,6 +37,12 @@ npm run dev
 
 Mock mode is always labelled in the interface. The application does not use accounts or cookies, and never returns the API key to the browser.
 
+Design Brief mock runs are deterministic. For validation and diagnostic testing, include one of these markers in the Insight Source:
+
+- `[mock:short]` returns a structurally valid brief below the 250-word recommendation.
+- `[mock:failure]` simulates a failed OpenAI request.
+- `[mock:refusal]` simulates an explicit model refusal.
+
 By default, application data is stored in the current user's operating-system application-data directory. Tests and isolated development sessions can set `INSIGHTFORGE_DATA_DIR` to override that location.
 
 ## Verification

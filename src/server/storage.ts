@@ -78,6 +78,50 @@ export async function initializeStorage(
         payload TEXT NOT NULL,
         checked_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS stage_runs (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL
+          REFERENCES projects(id) ON DELETE CASCADE,
+        stage_id TEXT NOT NULL,
+        status TEXT NOT NULL
+          CHECK (status IN ('running', 'succeeded', 'failed')),
+        started_at TEXT NOT NULL,
+        completed_at TEXT,
+        duration_ms INTEGER,
+        prompt_snapshot TEXT NOT NULL,
+        model_snapshot TEXT NOT NULL,
+        stage_configuration_updated_at TEXT NOT NULL,
+        input_snapshot TEXT NOT NULL,
+        assembled_request TEXT NOT NULL,
+        response_id TEXT,
+        request_id TEXT,
+        usage_json TEXT,
+        validation_json TEXT,
+        error_code TEXT,
+        error_message TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS artifacts (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL
+          REFERENCES projects(id) ON DELETE CASCADE,
+        stage_id TEXT NOT NULL,
+        run_id TEXT NOT NULL
+          REFERENCES stage_runs(id) ON DELETE CASCADE,
+        markdown TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        validation_json TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS current_artifacts (
+        project_id TEXT NOT NULL
+          REFERENCES projects(id) ON DELETE CASCADE,
+        stage_id TEXT NOT NULL,
+        artifact_id TEXT NOT NULL UNIQUE
+          REFERENCES artifacts(id) ON DELETE CASCADE,
+        PRIMARY KEY (project_id, stage_id)
+      );
     `);
 
     const insertDefault = database.prepare(`

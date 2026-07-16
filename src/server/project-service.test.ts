@@ -46,6 +46,7 @@ describe('Project service', () => {
         name: 'Reduce abandoned onboarding',
         updatedAt: '2026-07-16T12:00:00.000Z',
         insightSourcePresent: true,
+        designBriefPresent: false,
       },
     ]);
   });

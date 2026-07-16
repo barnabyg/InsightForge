@@ -149,6 +149,11 @@ export function useProjects(): ProjectsController {
       setCurrentProject(null);
       setError(null);
       window.history.pushState({}, '', '/');
+      void refreshLibrary().catch((refreshError) => {
+        setError(refreshError instanceof Error
+          ? refreshError.message
+          : 'Projects could not be refreshed');
+      });
     },
 
     async updateInsightSource(id, insightSource) {

@@ -15,6 +15,7 @@ interface ProjectRow {
   created_at: string;
   updated_at: string;
   name_is_automatic: number;
+  design_brief_present?: number;
 }
 
 export interface ProjectServiceOptions {
@@ -36,6 +37,13 @@ export class ProjectNotFoundError extends Error {
   constructor(id: string) {
     super(`Project ${id} was not found`);
     this.name = 'ProjectNotFoundError';
+  }
+}
+
+export class ProjectInsightLockedError extends Error {
+  constructor() {
+    super('Insight Source is locked after generation');
+    this.name = 'ProjectInsightLockedError';
   }
 }
 
@@ -120,8 +128,14 @@ export async function openProjectService(
 
     listProjects() {
       const rows = database.prepare(`
-        SELECT id, name, insight_source, created_at, updated_at, name_is_automatic
-        FROM projects
+        SELECT project.id, project.name, project.insight_source,
+               project.created_at, project.updated_at, project.name_is_automatic,
+               EXISTS (
+                 SELECT 1 FROM current_artifacts AS current
+                 WHERE current.project_id = project.id
+                   AND current.stage_id = 'design_brief'
+               ) AS design_brief_present
+        FROM projects AS project
         ORDER BY updated_at DESC, created_at DESC, id ASC
       `).all() as unknown as ProjectRow[];
 
@@ -130,6 +144,7 @@ export async function openProjectService(
         name: row.name,
         updatedAt: row.updated_at,
         insightSourcePresent: row.insight_source.trim().length > 0,
+        designBriefPresent: row.design_brief_present === 1,
       }));
     },
 
@@ -151,6 +166,15 @@ export async function openProjectService(
     },
 
     updateInsightSource(id, insightSource) {
+      requireProject(id);
+      const hasGeneratedArtifact = database.prepare(`
+        SELECT 1
+        FROM current_artifacts
+        WHERE project_id = ? AND stage_id = 'design_brief'
+      `).get(id);
+      if (hasGeneratedArtifact) {
+        throw new ProjectInsightLockedError();
+      }
       const timestamp = now().toISOString();
       const result = database.prepare(`
         UPDATE projects

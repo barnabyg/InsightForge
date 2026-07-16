@@ -1,6 +1,7 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { CreateProjectInput } from '../shared/projects.js';
 import {
+  ProjectInsightLockedError,
   ProjectNotFoundError,
   type ProjectService,
 } from './project-service.js';
@@ -21,6 +22,9 @@ function badRequest(reply: FastifyReply, message: string) {
 function handleProjectError(error: unknown, reply: FastifyReply) {
   if (error instanceof ProjectNotFoundError) {
     return reply.status(404).send({ error: 'Project not found' });
+  }
+  if (error instanceof ProjectInsightLockedError) {
+    return reply.status(409).send({ error: error.message });
   }
   if (error instanceof TypeError) {
     return badRequest(reply, error.message);

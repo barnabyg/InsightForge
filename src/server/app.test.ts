@@ -105,7 +105,7 @@ describe('local application bootstrap', () => {
         apiKey: 'test-key',
         checkOpenAI: () => new Promise(() => undefined),
       }),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 25)),
+      new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
     ]);
 
     expect(appResult).not.toBeNull();
