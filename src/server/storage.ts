@@ -2,6 +2,7 @@ import { mkdir } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { defaultStageConfigurations } from './workflow-defaults.js';
 
 export interface StorageState {
   state: 'ready';
@@ -55,7 +56,45 @@ export async function initializeStorage(
         name_is_automatic INTEGER NOT NULL DEFAULT 1
           CHECK (name_is_automatic IN (0, 1))
       );
+
+      CREATE TABLE IF NOT EXISTS stage_configurations (
+        stage_id TEXT PRIMARY KEY,
+        prompt TEXT NOT NULL,
+        model TEXT NOT NULL,
+        image_quality TEXT
+          CHECK (image_quality IS NULL OR image_quality IN ('low', 'medium', 'high')),
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS prompt_drafts (
+        stage_id TEXT PRIMARY KEY
+          REFERENCES stage_configurations(stage_id) ON DELETE CASCADE,
+        prompt TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS model_discovery_cache (
+        cache_key TEXT PRIMARY KEY,
+        payload TEXT NOT NULL,
+        checked_at TEXT NOT NULL
+      );
     `);
+
+    const insertDefault = database.prepare(`
+      INSERT INTO stage_configurations (
+        stage_id, prompt, model, image_quality, updated_at
+      ) VALUES (?, ?, ?, ?, ?)
+      ON CONFLICT(stage_id) DO NOTHING
+    `);
+    for (const stage of defaultStageConfigurations) {
+      insertDefault.run(
+        stage.id,
+        stage.prompt,
+        stage.model,
+        stage.imageQuality,
+        '1970-01-01T00:00:00.000Z',
+      );
+    }
   } finally {
     database.close();
   }

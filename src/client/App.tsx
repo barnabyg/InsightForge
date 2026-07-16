@@ -1,9 +1,11 @@
 import { ConnectivityIndicator } from './ConnectivityIndicator.js';
 import { ProjectLibrary } from './ProjectLibrary.js';
 import { ProjectWorkspace } from './ProjectWorkspace.js';
+import { WorkflowConfigurationPage } from './WorkflowConfigurationPage.js';
 import styles from './App.module.css';
 import { useBootstrap } from './useBootstrap.js';
 import { useProjects } from './useProjects.js';
+import { useEffect, useState } from 'react';
 
 function classes(...names: string[]): string {
   return names.map((name) => styles[name]).filter(Boolean).join(' ');
@@ -12,6 +14,29 @@ function classes(...names: string[]): string {
 export function App() {
   const { shell, refreshConnectivity, refreshing } = useBootstrap();
   const projects = useProjects();
+  const [view, setView] = useState<'projects' | 'prompts'>(() =>
+    new URLSearchParams(window.location.search).get('view') === 'prompts'
+      ? 'prompts'
+      : 'projects');
+
+  useEffect(() => {
+    function followViewHistory() {
+      setView(new URLSearchParams(window.location.search).get('view') === 'prompts'
+        ? 'prompts'
+        : 'projects');
+    }
+    window.addEventListener('popstate', followViewHistory);
+    return () => window.removeEventListener('popstate', followViewHistory);
+  }, []);
+
+  function showView(nextView: 'projects' | 'prompts') {
+    setView(nextView);
+    window.history.pushState(
+      {},
+      '',
+      nextView === 'prompts' ? '/?view=prompts' : '/',
+    );
+  }
 
   return (
     <div className={classes('app-frame')}>
@@ -47,14 +72,24 @@ export function App() {
             <div>
               <p className={classes('eyebrow')}>Workspace</p>
               <nav>
-                <a className={classes('nav-item', 'nav-item--active')} href="#projects" aria-current="page">
+                <a
+                  className={classes('nav-item', view === 'projects' ? 'nav-item--active' : '')}
+                  href="/"
+                  aria-current={view === 'projects' ? 'page' : undefined}
+                  onClick={(event) => { event.preventDefault(); showView('projects'); }}
+                >
                   <span>Projects</span>
                   <span>{String(projects.projects.length).padStart(2, '0')}</span>
                 </a>
-                <span className={classes('nav-item', 'nav-item--muted')}>
+                <a
+                  className={classes('nav-item', view === 'prompts' ? 'nav-item--active' : '')}
+                  href="/?view=prompts"
+                  aria-current={view === 'prompts' ? 'page' : undefined}
+                  onClick={(event) => { event.preventDefault(); showView('prompts'); }}
+                >
                   <span>Prompts</span>
                   <span aria-hidden="true">↗</span>
-                </span>
+                </a>
               </nav>
             </div>
             <div className={classes('local-note')}>
@@ -66,7 +101,7 @@ export function App() {
             </div>
           </aside>
 
-          <ProjectLibrary
+          {view === 'projects' ? <ProjectLibrary
             projects={projects.projects}
             loading={projects.loading}
             onCreate={() => projects.createProject()}
@@ -74,7 +109,7 @@ export function App() {
             onRename={projects.renameProject}
             onDuplicate={projects.duplicateProject}
             onDelete={projects.deleteProject}
-          />
+          /> : <WorkflowConfigurationPage />}
         </div>
       )}
     </div>

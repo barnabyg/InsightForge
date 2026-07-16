@@ -8,7 +8,7 @@ The frontier is the lowest-numbered unblocked ticket. Only one ticket is claimed
 | --- | --- | --- |
 | [01](issues/01-launch-secure-local-shell.md) | Secure local shell | [resolved](issues/01-launch-secure-local-shell.md#answer) |
 | [02](issues/02-manage-projects-and-insights.md) | Projects and Insight Sources | [resolved](issues/02-manage-projects-and-insights.md#answer) |
-| [03](issues/03-configure-shared-workflow.md) | Shared workflow configuration | ready-for-agent |
+| [03](issues/03-configure-shared-workflow.md) | Shared workflow configuration | [resolved](issues/03-configure-shared-workflow.md#answer) |
 | [04](issues/04-generate-design-brief.md) | Design Brief generation | ready-for-agent |
 | [05](issues/05-generate-concept-screens.md) | Concept Screen Set generation | ready-for-agent |
 | [06](issues/06-generate-prd.md) | PRD generation | ready-for-agent |
