@@ -354,6 +354,24 @@ export function registerWorkflowRoutes(
   );
 
   app.get<{ Params: ProjectParameters }>(
+    '/api/projects/:id/backup',
+    async (request, reply) => {
+      try {
+        const exported = workflows.exportProjectBackup(request.params.id);
+        return reply
+          .type('application/zip')
+          .header(
+            'content-disposition',
+            `attachment; filename="${exported.fileName}"`,
+          )
+          .send(exported.bytes);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.get<{ Params: ProjectParameters }>(
     '/api/projects/:id/deliverables',
     async (request, reply) => {
       try {

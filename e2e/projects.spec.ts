@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { strFromU8, unzipSync } from 'fflate';
 
 test('Author creates, imports, saves, and manages Projects', async ({ page }) => {
   await page.goto('/');
@@ -52,6 +54,25 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
   const renamedCard = page.getByRole('article', {
     name: 'Confident retrofit choices',
   });
+  const backupDownload = page.waitForEvent('download');
+  await renamedCard.getByRole('link', { name: 'Export Project backup' }).click();
+  const backup = await backupDownload;
+  expect(backup.suggestedFilename()).toBe('confident-retrofit-choices-backup.zip');
+  const backupPath = await backup.path();
+  expect(backupPath).not.toBeNull();
+  const backupFiles = unzipSync(await readFile(backupPath!));
+  expect(JSON.parse(strFromU8(backupFiles['manifest.json']))).toMatchObject({
+    format: 'insightforge.project-backup',
+    schemaVersion: 1,
+    project: { name: 'Confident retrofit choices' },
+  });
+  expect(JSON.parse(strFromU8(backupFiles['project.json']))).toMatchObject({
+    project: {
+      name: 'Confident retrofit choices',
+      insightSource: '# Installer confidence\n\nQuotes hide important trade-offs.',
+    },
+  });
+
   await renamedCard.getByRole('button', { name: 'Duplicate project' }).click();
   await expect(
     page.getByRole('article', { name: 'Confident retrofit choices — Copy' }),

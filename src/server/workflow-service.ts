@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -37,6 +37,7 @@ import type {
   WorkflowSnapshot,
 } from '../shared/generation.js';
 import type { ImageQuality, StageId } from '../shared/workflow-configuration.js';
+import { applicationMetadata } from './app-metadata.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
 import { initializeStorage } from './storage.js';
@@ -173,6 +174,42 @@ interface WorkflowSnapshotRow {
   prd_artifact_id: string | null;
 }
 
+interface ProjectBackupRow extends ProjectRow {
+  created_at: string;
+  updated_at: string;
+  name_is_automatic: number;
+}
+
+interface BackupArtifactRow extends ArtifactRow {
+  stage_id: GeneratedStageId;
+}
+
+interface BackupRunRow extends RunRow {
+  stage_id: GeneratedStageId;
+}
+
+interface BackupConceptOperationRow extends ConceptOperationRow {
+  run_id: string;
+}
+
+interface BinaryAssetRow {
+  id: string;
+  project_id: string;
+  run_id: string;
+  relative_path: string;
+  media_type: 'image/png';
+  byte_size: number;
+  width: number;
+  height: number;
+  created_at: string;
+}
+
+interface PendingCascadeRow {
+  project_id: string;
+  design_brief_artifact_id: string;
+  created_at: string;
+}
+
 const workflowSnapshotSelection = `
   SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
          design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
@@ -192,6 +229,7 @@ export interface WorkflowService {
   deleteWorkflowSnapshot(projectId: string, snapshotId: string): Promise<ProjectWorkflow>;
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
   exportDeliverables(projectId: string): DeliverableExport;
+  exportProjectBackup(projectId: string): ProjectBackupExport;
   generateDesignBrief(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generateConceptScreens(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generatePrd(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
@@ -222,6 +260,11 @@ export interface WorkflowService {
 }
 
 export interface DeliverableExport {
+  fileName: string;
+  bytes: Buffer;
+}
+
+export interface ProjectBackupExport {
   fileName: string;
   bytes: Buffer;
 }
@@ -1731,6 +1774,251 @@ export async function openWorkflowService(
       `).get(assetId, projectId) as unknown as { relative_path: string } | undefined;
       if (!asset) throw new WorkflowProjectNotFoundError(assetId);
       return readFileSync(join(dataDirectory, asset.relative_path));
+    },
+
+    exportProjectBackup(projectId) {
+      requireProject(projectId);
+      const project = database.prepare(`
+        SELECT id, name, insight_source, created_at, updated_at, name_is_automatic
+        FROM projects
+        WHERE id = ?
+      `).get(projectId) as unknown as ProjectBackupRow;
+      const currentArtifacts = database.prepare(`
+        SELECT stage_id, artifact_id
+        FROM current_artifacts
+        WHERE project_id = ?
+        ORDER BY stage_id
+      `).all(projectId) as unknown as Array<{
+        stage_id: GeneratedStageId;
+        artifact_id: string;
+      }>;
+      const snapshots = database.prepare(`${workflowSnapshotSelection}
+        WHERE project_id = ?
+        ORDER BY created_at, rowid
+      `).all(projectId) as unknown as WorkflowSnapshotRow[];
+      const revisions = database.prepare(`
+        SELECT id, project_id, insight_source, created_at, updated_at
+        FROM insight_revisions
+        WHERE project_id = ?
+        ORDER BY created_at, rowid
+      `).all(projectId) as unknown as InsightRevisionRow[];
+      const candidates = database.prepare(`
+        SELECT *
+        FROM workflow_candidates
+        WHERE project_id = ?
+        ORDER BY started_at, rowid
+      `).all(projectId) as unknown as CandidateRow[];
+      const pendingCascades = database.prepare(`
+        SELECT project_id, design_brief_artifact_id, created_at
+        FROM pending_cascades
+        WHERE project_id = ?
+        ORDER BY created_at, rowid
+      `).all(projectId) as unknown as PendingCascadeRow[];
+      const artifacts = database.prepare(`
+        SELECT id, project_id, stage_id, run_id, markdown, created_at, validation_json
+        FROM artifacts
+        WHERE project_id = ?
+        ORDER BY created_at, rowid
+      `).all(projectId) as unknown as BackupArtifactRow[];
+      const runs = database.prepare(`
+        SELECT *
+        FROM stage_runs
+        WHERE project_id = ?
+        ORDER BY started_at, rowid
+      `).all(projectId) as unknown as BackupRunRow[];
+      const operations = database.prepare(`
+        SELECT operation.*
+        FROM concept_screen_operations AS operation
+        JOIN stage_runs AS run ON run.id = operation.run_id
+        WHERE run.project_id = ?
+        ORDER BY run.started_at, run.rowid, operation.ordinal
+      `).all(projectId) as unknown as BackupConceptOperationRow[];
+      const assets = database.prepare(`
+        SELECT id, project_id, run_id, relative_path, media_type, byte_size,
+               width, height, created_at
+        FROM binary_assets
+        WHERE project_id = ?
+        ORDER BY created_at, rowid
+      `).all(projectId) as unknown as BinaryAssetRow[];
+      const stageKey = (stageId: GeneratedStageId) => ({
+        design_brief: 'designBrief',
+        concept_screens: 'conceptScreens',
+        prd: 'prd',
+      } as const)[stageId];
+      const artifactIds = (entries: Array<{
+        stage_id: GeneratedStageId;
+        artifact_id: string | null;
+      }>) => Object.fromEntries(entries.flatMap(({ stage_id, artifact_id }) =>
+        artifact_id ? [[stageKey(stage_id), artifact_id]] : []));
+      const exportedAt = now().toISOString();
+      const binaryAssets = assets.map((asset) => ({
+        id: asset.id,
+        projectId: asset.project_id,
+        runId: asset.run_id,
+        archivePath: `assets/${asset.id}.png`,
+        mediaType: asset.media_type,
+        byteSize: asset.byte_size,
+        width: asset.width,
+        height: asset.height,
+        createdAt: asset.created_at,
+      }));
+      const backup = {
+        schemaVersion: 1,
+        exportedAt,
+        project: {
+          id: project.id,
+          name: project.name,
+          insightSource: project.insight_source,
+          createdAt: project.created_at,
+          updatedAt: project.updated_at,
+          nameIsAutomatic: project.name_is_automatic === 1,
+        },
+        currentWorkflow: {
+          artifactIds: artifactIds(currentArtifacts),
+        },
+        workflowSnapshots: snapshots.map((snapshot) => ({
+          id: snapshot.id,
+          createdAt: snapshot.created_at,
+          preservedBy: snapshot.preserved_by,
+          replacedFromStage: snapshot.replaced_from_stage,
+          insightSource: snapshot.insight_source,
+          artifactIds: artifactIds([
+            {
+              stage_id: 'design_brief',
+              artifact_id: snapshot.design_brief_artifact_id,
+            },
+            {
+              stage_id: 'concept_screens',
+              artifact_id: snapshot.concept_screen_artifact_id,
+            },
+            { stage_id: 'prd', artifact_id: snapshot.prd_artifact_id },
+          ]),
+        })),
+        insightRevisions: revisions.map((revision) => ({
+          id: revision.id,
+          projectId: revision.project_id,
+          insightSource: revision.insight_source,
+          createdAt: revision.created_at,
+          updatedAt: revision.updated_at,
+        })),
+        candidates: candidates.map((candidate) => ({
+          id: candidate.id,
+          projectId: candidate.project_id,
+          runKind: candidate.run_kind,
+          status: candidate.status,
+          currentStage: candidate.current_stage,
+          completedOperationCount: candidate.completed_operation_count,
+          startStage: candidate.start_stage,
+          insightSource: candidate.insight_source,
+          insightRevisionId: candidate.insight_revision_id,
+          configuration: JSON.parse(candidate.configuration_json) as CandidateConfigurations,
+          designBriefRunId: candidate.design_brief_run_id,
+          designBriefArtifactId: candidate.design_brief_artifact_id,
+          conceptScreenRunId: candidate.concept_screen_run_id,
+          conceptScreenArtifactId: candidate.concept_screen_artifact_id,
+          prdRunId: candidate.prd_run_id,
+          prdArtifactId: candidate.prd_artifact_id,
+          warnings: readJson<CandidateWarning[]>(candidate.warnings_json) ?? [],
+          error: candidate.error_code && candidate.error_message
+            ? { code: candidate.error_code, message: candidate.error_message }
+            : null,
+          startedAt: candidate.started_at,
+          updatedAt: candidate.updated_at,
+        })),
+        pendingCascades: pendingCascades.map((pending) => ({
+          projectId: pending.project_id,
+          designBriefArtifactId: pending.design_brief_artifact_id,
+          createdAt: pending.created_at,
+        })),
+        artifacts: artifacts.map((artifact) => ({
+          id: artifact.id,
+          projectId: artifact.project_id,
+          stageId: artifact.stage_id,
+          runId: artifact.run_id,
+          markdown: artifact.markdown,
+          createdAt: artifact.created_at,
+          validation: JSON.parse(artifact.validation_json) as ArtifactValidation,
+        })),
+        stageRuns: runs.map((run) => ({
+          id: run.id,
+          projectId: run.project_id,
+          stageId: run.stage_id,
+          runKind: run.run_kind,
+          status: run.status,
+          startedAt: run.started_at,
+          completedAt: run.completed_at,
+          durationMs: run.duration_ms,
+          prompt: run.prompt_snapshot,
+          model: run.model_snapshot,
+          stageConfigurationUpdatedAt: run.stage_configuration_updated_at,
+          input: run.input_snapshot,
+          inputArtifactId: run.input_artifact_id,
+          inputRunId: run.input_run_id,
+          inputLineage: readJson<unknown>(run.input_lineage_json),
+          assembledRequest: run.assembled_request,
+          settings: readJson<unknown>(run.settings_json),
+          attemptHistory: readJson<unknown>(run.attempt_history_json),
+          responseId: run.response_id,
+          requestId: run.request_id,
+          usage: readJson<TokenUsage>(run.usage_json),
+          validation: readJson<ArtifactValidation | ConceptScreenValidation>(
+            run.validation_json,
+          ),
+          error: run.error_code && run.error_message
+            ? { code: run.error_code, message: run.error_message }
+            : null,
+        })),
+        conceptScreenOperations: operations.map((operation) => ({
+          runId: operation.run_id,
+          ordinal: operation.ordinal,
+          status: operation.status,
+          startedAt: operation.started_at,
+          completedAt: operation.completed_at,
+          durationMs: operation.duration_ms,
+          assetId: operation.asset_id,
+          responseId: operation.response_id,
+          requestId: operation.request_id,
+          usage: readJson<TokenUsage>(operation.usage_json),
+          error: operation.error_code && operation.error_message
+            ? { code: operation.error_code, message: operation.error_message }
+            : null,
+        })),
+        binaryAssets,
+      };
+      const projectBytes = strToU8(`${JSON.stringify(backup, null, 2)}\n`);
+      const assetFiles = assets.map((asset, index) => ({
+        path: binaryAssets[index]!.archivePath,
+        bytes: readFileSync(join(dataDirectory, asset.relative_path)),
+      }));
+      const payloadFiles = [
+        { path: 'project.json', bytes: projectBytes },
+        ...assetFiles,
+      ];
+      const manifest = {
+        format: 'insightforge.project-backup',
+        schemaVersion: 1,
+        application: applicationMetadata,
+        exportedAt,
+        project: { id: project.id, name: project.name },
+        description: 'Complete portable Project data and Project-owned binary assets.',
+        contents: { project: 'project.json', assets: 'assets/' },
+        integrity: {
+          algorithm: 'sha256',
+          files: payloadFiles.map(({ path, bytes }) => ({
+            path,
+            byteSize: bytes.byteLength,
+            sha256: createHash('sha256').update(bytes).digest('hex'),
+          })),
+        },
+      };
+      const archive = zipSync({
+        ...Object.fromEntries(payloadFiles.map(({ path, bytes }) => [path, bytes])),
+        'manifest.json': strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
+      }, { level: 6 });
+      return {
+        fileName: `${fileNameSlug(project.name)}-backup.zip`,
+        bytes: Buffer.from(archive),
+      };
     },
 
     exportDeliverables(projectId) {

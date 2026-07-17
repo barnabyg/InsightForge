@@ -528,4 +528,64 @@ describe('Workflow HTTP API', () => {
     expect(strFromU8(files['prd.md'])).toContain('# Product Requirements Document');
     expect(Object.keys(files)).toContain('manifest.json');
   });
+
+  it('downloads a complete Project backup without generation or an OpenAI check', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    let connectivityChecks = 0;
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'mock',
+      checkOpenAI: async () => {
+        connectivityChecks += 1;
+        return {
+          state: 'connected',
+          message: 'Mock OpenAI is available.',
+          checkedAt: '2026-07-17T09:00:00.000Z',
+        };
+      },
+    });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Portable Project',
+        insightSource: 'This local Project must remain portable without OpenAI.',
+      },
+    });
+    const projectId = created.json().id as string;
+    const checksBeforeExport = connectivityChecks;
+
+    const exported = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}/backup`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(exported.statusCode).toBe(200);
+    expect(exported.headers['content-type']).toBe('application/zip');
+    expect(exported.headers['content-disposition']).toBe(
+      'attachment; filename="portable-project-backup.zip"',
+    );
+    expect(connectivityChecks).toBe(checksBeforeExport);
+    const files = unzipSync(exported.rawPayload);
+    expect(JSON.parse(strFromU8(files['manifest.json']))).toMatchObject({
+      format: 'insightforge.project-backup',
+      schemaVersion: 1,
+      project: { id: projectId, name: 'Portable Project' },
+    });
+    expect(JSON.parse(strFromU8(files['project.json']))).toMatchObject({
+      schemaVersion: 1,
+      project: {
+        id: projectId,
+        insightSource: 'This local Project must remain portable without OpenAI.',
+      },
+      currentWorkflow: { artifactIds: {} },
+      workflowSnapshots: [],
+      candidates: [],
+      binaryAssets: [],
+    });
+  });
 });

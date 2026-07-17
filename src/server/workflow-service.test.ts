@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -2440,5 +2441,172 @@ describe('Workflow service', () => {
     expect(strFromU8(files['manifest.json'])).not.toContain(project.insightSource);
     expect(strFromU8(files['manifest.json'])).not.toContain('apiKey');
     expect(strFromU8(files['manifest.json'])).not.toContain('insightforge.sqlite');
+  });
+
+  it('exports a complete versioned Project backup with integrity metadata', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory, {
+      now: () => new Date('2026-07-17T09:00:00.000Z'),
+    });
+    projectServices.push(projects);
+    const project = projects.createProject({
+      name: 'Portable Retrofit Project',
+      insightSource: 'Homeowners need a portable record of retrofit decisions.',
+    });
+    const pngs = [pngFixture(35), pngFixture(85), pngFixture(135)];
+    const workflows = await openWorkflowService(dataDirectory, {
+      now: () => new Date('2026-07-17T09:05:00.000Z'),
+      textGeneration: {
+        async generateDesignBrief() {
+          return {
+            markdown: '# Design Brief\n\nA portable comparison workflow.',
+            responseId: 'resp_backup_brief',
+            requestId: 'req_backup_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          return {
+            markdown: '# PRD\n\nThe Author can preserve a complete decision record.',
+            responseId: 'resp_backup_prd',
+            requestId: 'req_backup_prd',
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngs[input.ordinal - 1],
+            responseId: `resp_backup_screen_${input.ordinal}`,
+            requestId: `req_backup_screen_${input.ordinal}`,
+            usage: { inputTokens: 50, outputTokens: 60, totalTokens: 110 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+
+    await workflows.generateDesignBrief(project.id);
+    await workflows.generateConceptScreens(project.id);
+    await workflows.generatePrd(project.id);
+    let replacement = await workflows.regenerateWorkflow(project.id, 'design_brief');
+    while (replacement.candidate?.status === 'paused') {
+      replacement = await workflows.resumeFullWorkflow(project.id);
+    }
+    workflows.promoteFullWorkflow(project.id);
+    const resumable = await workflows.regenerateWorkflow(project.id, 'design_brief');
+    expect(resumable.candidate).toMatchObject({
+      status: 'paused',
+      currentStage: 'concept_screens',
+    });
+
+    const configuration = await openWorkflowConfigurationService(dataDirectory, {
+      now: () => new Date('2026-07-17T09:06:00.000Z'),
+    });
+    configuration.commitStageConfiguration('prd', {
+      prompt: 'GLOBAL_ONLY_DO_NOT_EXPORT',
+      model: 'gpt-5.4-mini',
+      imageQuality: null,
+    });
+    configuration.close();
+
+    const exported = workflows.exportProjectBackup(project.id);
+    const files = unzipSync(exported.bytes);
+    const manifestText = strFromU8(files['manifest.json']);
+    const projectText = strFromU8(files['project.json']);
+    const manifest = JSON.parse(manifestText) as {
+      format: string;
+      schemaVersion: number;
+      application: { name: string; version: string };
+      project: { id: string; name: string };
+      contents: { project: string; assets: string };
+      integrity: {
+        algorithm: string;
+        files: Array<{ path: string; byteSize: number; sha256: string }>;
+      };
+    };
+    const backup = JSON.parse(projectText) as {
+      schemaVersion: number;
+      project: { id: string; name: string; insightSource: string };
+      currentWorkflow: { artifactIds: Record<string, string> };
+      workflowSnapshots: Array<{ id: string; artifactIds: Record<string, string> }>;
+      candidates: Array<{
+        id: string;
+        status: string;
+        configuration: Record<string, unknown>;
+        designBriefArtifactId: string;
+      }>;
+      artifacts: Array<{ id: string; runId: string; markdown: string }>;
+      stageRuns: Array<{ id: string; prompt: string; model: string }>;
+      binaryAssets: Array<{
+        id: string;
+        archivePath: string;
+        byteSize: number;
+      }>;
+    };
+
+    expect(exported.fileName).toBe('portable-retrofit-project-backup.zip');
+    expect(manifest).toMatchObject({
+      format: 'insightforge.project-backup',
+      schemaVersion: 1,
+      application: { name: 'InsightForge', version: '0.1.0' },
+      project: { id: project.id, name: 'Portable Retrofit Project' },
+      contents: { project: 'project.json', assets: 'assets/' },
+      integrity: { algorithm: 'sha256' },
+    });
+    expect(backup).toMatchObject({
+      schemaVersion: 1,
+      project: {
+        id: project.id,
+        name: 'Portable Retrofit Project',
+        insightSource: project.insightSource,
+      },
+    });
+    expect(Object.keys(backup.currentWorkflow.artifactIds).sort()).toEqual([
+      'conceptScreens',
+      'designBrief',
+      'prd',
+    ]);
+    expect(backup.workflowSnapshots).toHaveLength(1);
+    expect(Object.keys(backup.workflowSnapshots[0]!.artifactIds).sort()).toEqual([
+      'conceptScreens',
+      'designBrief',
+      'prd',
+    ]);
+    expect(backup.candidates).toEqual([
+      expect.objectContaining({
+        id: resumable.candidate!.id,
+        status: 'paused',
+        designBriefArtifactId: expect.any(String),
+        configuration: expect.objectContaining({
+          designBrief: expect.objectContaining({ prompt: expect.any(String) }),
+        }),
+      }),
+    ]);
+    expect(backup.artifacts).toHaveLength(7);
+    expect(backup.stageRuns).toHaveLength(7);
+    expect(backup.binaryAssets).toHaveLength(6);
+
+    const payloadPaths = ['project.json', ...backup.binaryAssets.map(({ archivePath }) =>
+      archivePath)].sort();
+    expect(Object.keys(files).sort()).toEqual(['manifest.json', ...payloadPaths].sort());
+    expect(manifest.integrity.files.map(({ path }) => path).sort()).toEqual(payloadPaths);
+    for (const integrity of manifest.integrity.files) {
+      const bytes = files[integrity.path];
+      expect(bytes, integrity.path).toBeDefined();
+      expect(integrity.byteSize).toBe(bytes!.byteLength);
+      expect(integrity.sha256).toBe(
+        createHash('sha256').update(bytes!).digest('hex'),
+      );
+    }
+
+    const archiveText = `${manifestText}\n${projectText}`;
+    expect(archiveText).not.toContain('GLOBAL_ONLY_DO_NOT_EXPORT');
+    expect(archiveText).not.toContain('OPENAI_API_KEY');
+    expect(archiveText).not.toContain('insightforge.sqlite');
+    expect(archiveText).not.toContain(dataDirectory);
+    expect(projectText).not.toContain('relative_path');
   });
 });
