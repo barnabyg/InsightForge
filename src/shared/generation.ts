@@ -121,7 +121,19 @@ export interface DesignBriefArtifact {
   validation: ArtifactValidation;
 }
 
-export type GeneratedStageId = 'design_brief' | 'concept_screens' | 'prd';
+export const generatedStageIds = [
+  'design_brief',
+  'concept_screens',
+  'prd',
+] as const;
+
+export type GeneratedStageId = typeof generatedStageIds[number];
+
+export const generatedStageNames: Record<GeneratedStageId, string> = {
+  design_brief: 'Design Brief',
+  concept_screens: 'Concept Screens',
+  prd: 'PRD',
+};
 export type RunKind = 'initial' | 'regeneration' | 'variation';
 
 export type WorkflowChangeKind = 'input' | 'prompt' | 'model' | 'settings';

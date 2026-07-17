@@ -5,6 +5,10 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strToU8, zipSync } from 'fflate';
 import { PNG } from 'pngjs';
+import {
+  generatedStageIds,
+  generatedStageNames,
+} from '../shared/generation.js';
 import type {
   ArtifactValidation,
   CandidateWarning,
@@ -257,18 +261,6 @@ function validateDesignBrief(markdown: string): ArtifactValidation {
 function readJson<T>(value: string | null): T | null {
   return value === null ? null : JSON.parse(value) as T;
 }
-
-const generatedStages: GeneratedStageId[] = [
-  'design_brief',
-  'concept_screens',
-  'prd',
-];
-
-const generatedStageNames: Record<GeneratedStageId, string> = {
-  design_brief: 'Design Brief',
-  concept_screens: 'Concept Screens',
-  prd: 'PRD',
-};
 
 const workflowChangeMessages: Record<WorkflowChangeKind, string> = {
   input: 'The Stage Input changed since the current Artifact was generated.',
@@ -908,7 +900,7 @@ export async function openWorkflowService(
       previous: WorkflowFingerprint;
       current: WorkflowFingerprint;
     }>();
-    for (const stageId of generatedStages) {
+    for (const stageId of generatedStageIds) {
       const stage = stageFingerprints(projectId, stageId);
       if (!stage) continue;
       fingerprints.set(stageId, stage);
@@ -922,14 +914,14 @@ export async function openWorkflowService(
         }
       }
     }
-    const earliestChangedStage = generatedStages.find((stageId) =>
+    const earliestChangedStage = generatedStageIds.find((stageId) =>
       changes.some((change) => change.stageId === stageId));
     if (!earliestChangedStage) return null;
     return {
       earliestChangedStage,
-      affectedStages: generatedStages.slice(generatedStages.indexOf(earliestChangedStage)),
+      affectedStages: generatedStageIds.slice(generatedStageIds.indexOf(earliestChangedStage)),
       changes,
-      fingerprints: generatedStages
+      fingerprints: generatedStageIds
         .filter((stageId) => changes.some((change) => change.stageId === stageId))
         .map((stageId) => ({ stageId, ...fingerprints.get(stageId)! })),
     };
@@ -2402,7 +2394,7 @@ export async function openWorkflowService(
 
     async regenerateWorkflow(projectId, startStage) {
       const project = requireProject(projectId);
-      if (!generatedStages.includes(startStage)) {
+      if (!generatedStageIds.includes(startStage)) {
         throw new WorkflowValidationError('Choose a valid stage to regenerate.');
       }
       if (candidateRow(projectId)) {
@@ -2431,8 +2423,8 @@ export async function openWorkflowService(
       const update = rerunPlan(projectId);
       if (
         update
-        && generatedStages.indexOf(startStage)
-          > generatedStages.indexOf(update.earliestChangedStage)
+        && generatedStageIds.indexOf(startStage)
+          > generatedStageIds.indexOf(update.earliestChangedStage)
       ) {
         throw new WorkflowValidationError(
           `Regenerate from ${generatedStageNames[update.earliestChangedStage]} to include every changed stage.`,
@@ -2446,7 +2438,7 @@ export async function openWorkflowService(
         conceptScreens: conceptScreenConfiguration(),
         prd: prdConfiguration(),
       };
-      const startsAtIndex = generatedStages.indexOf(startStage);
+      const startsAtIndex = generatedStageIds.indexOf(startStage);
       const completedOperationCount = startStage === 'design_brief'
         ? 0
         : startStage === 'concept_screens'

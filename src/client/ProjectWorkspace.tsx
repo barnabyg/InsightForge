@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { generatedStageIds, generatedStageNames } from '../shared/generation.js';
 import type { CandidateWorkflow, GeneratedStageId } from '../shared/generation.js';
 import type { Project } from '../shared/projects.js';
 import { MarkdownArtifact } from './MarkdownArtifact.js';
@@ -25,18 +26,6 @@ interface PendingImport {
 }
 
 type CandidatePrimaryAction = 'cancel' | 'promote' | 'resume';
-
-const generatedStageNames: Record<GeneratedStageId, string> = {
-  design_brief: 'Design Brief',
-  concept_screens: 'Concept Screens',
-  prd: 'PRD',
-};
-
-const generatedStageOrder: GeneratedStageId[] = [
-  'design_brief',
-  'concept_screens',
-  'prd',
-];
 
 const candidatePresentationByStatus = {
   running: {
@@ -315,8 +304,8 @@ export function ProjectWorkspace({
 
   function rerunStartFor(stageId: GeneratedStageId): GeneratedStageId {
     if (!rerunPlan) return stageId;
-    return generatedStageOrder.indexOf(stageId)
-      >= generatedStageOrder.indexOf(rerunPlan.earliestChangedStage)
+    return generatedStageIds.indexOf(stageId)
+      >= generatedStageIds.indexOf(rerunPlan.earliestChangedStage)
       ? rerunPlan.earliestChangedStage
       : stageId;
   }
@@ -371,7 +360,7 @@ export function ProjectWorkspace({
   }
 
   const confirmedRerunStages = confirmRerun
-    ? generatedStageOrder.slice(generatedStageOrder.indexOf(confirmRerun))
+    ? generatedStageIds.slice(generatedStageIds.indexOf(confirmRerun))
     : [];
   const confirmedOperationCount = confirmRerun === 'design_brief'
     ? 5
