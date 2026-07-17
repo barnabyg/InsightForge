@@ -588,4 +588,78 @@ describe('Workflow HTTP API', () => {
       binaryAssets: [],
     });
   });
+
+  it('imports a Project Export through a stable offline HTTP command', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    let connectivityChecks = 0;
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'mock',
+      checkOpenAI: async () => {
+        connectivityChecks += 1;
+        return {
+          state: 'connected',
+          message: 'Mock OpenAI is available.',
+          checkedAt: '2026-07-17T10:30:00.000Z',
+        };
+      },
+    });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Offline Portable Project',
+        insightSource: 'Import must not depend on OpenAI or cloud services.',
+      },
+    });
+    const sourceId = created.json().id as string;
+    const exported = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${sourceId}/export`,
+      headers: { host: 'localhost:4317' },
+    });
+    const checksBeforeImport = connectivityChecks;
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/project-imports',
+      headers: {
+        host: 'localhost:4317',
+        'content-type': 'application/zip',
+      },
+      payload: exported.rawPayload,
+    });
+
+    expect(imported.statusCode).toBe(201);
+    expect(imported.json()).toMatchObject({
+      id: expect.not.stringContaining(sourceId),
+      name: 'Offline Portable Project (Imported)',
+      insightSource: 'Import must not depend on OpenAI or cloud services.',
+    });
+    expect(connectivityChecks).toBe(checksBeforeImport);
+    const library = await app.inject({
+      method: 'GET',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+    });
+    expect(library.json()).toHaveLength(2);
+
+    const invalid = await app.inject({
+      method: 'POST',
+      url: '/api/project-imports',
+      headers: {
+        host: 'localhost:4317',
+        'content-type': 'application/zip',
+      },
+      payload: Buffer.from('not a Project Export'),
+    });
+    expect(invalid.statusCode).toBe(400);
+    expect(invalid.json()).toEqual({
+      code: 'project_import_archive_invalid',
+      error: 'The selected file is not a readable Project Export archive.',
+    });
+  });
 });

@@ -113,6 +113,7 @@ export function App() {
             projects={projects.projects}
             loading={projects.loading}
             onCreate={() => projects.createProject()}
+            onImport={projects.importProject}
             onOpen={projects.openProject}
             onRename={projects.renameProject}
             onDuplicate={projects.duplicateProject}

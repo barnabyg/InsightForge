@@ -1,5 +1,6 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { WorkflowRerunRequest } from '../shared/generation.js';
+import { ProjectImportError } from './project-import.js';
 import {
   WorkflowGenerationError,
   WorkflowProjectNotFoundError,
@@ -24,6 +25,9 @@ export interface WorkflowRouteOptions {
 }
 
 function handleWorkflowError(error: unknown, reply: FastifyReply) {
+  if (error instanceof ProjectImportError) {
+    return reply.status(400).send({ code: error.code, error: error.message });
+  }
   if (error instanceof WorkflowProjectNotFoundError) {
     return reply.status(404).send({
       code: 'project_not_found',
@@ -49,6 +53,23 @@ export function registerWorkflowRoutes(
   workflows: WorkflowService,
   options: WorkflowRouteOptions = {},
 ): void {
+  app.addContentTypeParser(
+    'application/zip',
+    { parseAs: 'buffer', bodyLimit: 250 * 1024 * 1024 },
+    (_request, body, done) => done(null, body),
+  );
+
+  app.post<{ Body: Buffer }>(
+    '/api/project-imports',
+    async (request, reply) => {
+      try {
+        return reply.status(201).send(workflows.importProject(request.body));
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
   app.get<{ Params: ProjectParameters }>(
     '/api/projects/:id/workflow',
     async (request, reply) => {

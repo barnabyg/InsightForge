@@ -40,6 +40,7 @@ import type { ImageQuality, StageId } from '../shared/workflow-configuration.js'
 import { applicationMetadata } from './app-metadata.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
+import { importProjectExport } from './project-import.js';
 import { initializeStorage } from './storage.js';
 import {
   buildPrdStageInput,
@@ -230,6 +231,7 @@ export interface WorkflowService {
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
   exportDeliverables(projectId: string): DeliverableExport;
   exportProject(projectId: string): ProjectExport;
+  importProject(archive: Buffer): import('../shared/projects.js').Project;
   generateDesignBrief(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generateConceptScreens(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generatePrd(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
@@ -2020,6 +2022,10 @@ export async function openWorkflowService(
         fileName: `${fileNameSlug(project.name)}-project-export.zip`,
         bytes: Buffer.from(archive),
       };
+    },
+
+    importProject(archive) {
+      return importProjectExport(database, dataDirectory, archive, now());
     },
 
     exportDeliverables(projectId) {

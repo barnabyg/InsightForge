@@ -25,6 +25,7 @@ export interface ProjectsController {
   loading: boolean;
   error: string | null;
   createProject(input?: CreateProjectInput): Promise<Project>;
+  importProject(file: File): Promise<Project>;
   openProject(id: string): Promise<void>;
   refreshCurrentProject(): Promise<Project>;
   refreshLibrary(): Promise<void>;
@@ -140,6 +141,18 @@ export function useProjects(): ProjectsController {
         setCurrentProject(project);
         await refreshLibrary();
         window.history.pushState({}, '', `/?project=${encodeURIComponent(project.id)}`);
+        return project;
+      });
+    },
+
+    async importProject(file) {
+      return run(async () => {
+        const project = await requestJson<Project>('/api/project-imports', {
+          method: 'POST',
+          headers: { 'content-type': 'application/zip' },
+          body: file,
+        });
+        await refreshLibrary();
         return project;
       });
     },

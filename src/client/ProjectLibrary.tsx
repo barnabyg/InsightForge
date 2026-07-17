@@ -7,6 +7,7 @@ interface ProjectLibraryProps {
   projects: ProjectSummary[];
   loading: boolean;
   onCreate(): Promise<unknown>;
+  onImport(file: File): Promise<unknown>;
   onOpen(id: string): Promise<void>;
   onRename(id: string, name: string): Promise<void>;
   onDuplicate(id: string): Promise<void>;
@@ -31,6 +32,7 @@ export function ProjectLibrary({
   projects,
   loading,
   onCreate,
+  onImport,
   onOpen,
   onRename,
   onDuplicate,
@@ -62,15 +64,32 @@ export function ProjectLibrary({
             Shape the prompts. Run the workflow. Refine the thinking behind every artifact.
           </p>
         </div>
-        <button
-          className={styles['primary-action']}
-          type="button"
-          disabled={busy}
-          onClick={() => void perform(async () => { await onCreate(); })}
-        >
-          <span aria-hidden="true">＋</span>
-          Create project
-        </button>
+        <div className={styles['library-hero-actions']}>
+          <button
+            className={styles['primary-action']}
+            type="button"
+            disabled={busy}
+            onClick={() => void perform(async () => { await onCreate(); })}
+          >
+            <span aria-hidden="true">＋</span>
+            Create project
+          </button>
+          <label className={styles['secondary-action']} aria-disabled={busy}>
+            Import project
+            <input
+              className={styles['visually-hidden']}
+              type="file"
+              accept=".zip,application/zip"
+              aria-label="Import Project file"
+              disabled={busy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void perform(async () => { await onImport(file); });
+                event.target.value = '';
+              }}
+            />
+          </label>
+        </div>
       </section>
 
       <aside className={styles['privacy-notice']} aria-label="Privacy and OpenAI boundary">

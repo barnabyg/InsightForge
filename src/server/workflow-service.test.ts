@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8, strToU8, unzipSync, zipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
 import { openProjectService, type ProjectService } from './project-service.js';
@@ -2608,5 +2608,149 @@ describe('Workflow service', () => {
     expect(archiveText).not.toContain('insightforge.sqlite');
     expect(archiveText).not.toContain(dataDirectory);
     expect(projectText).not.toContain('relative_path');
+
+    const sourceWorkflow = workflows.getProjectWorkflow(project.id);
+    const imported = workflows.importProject(exported.bytes);
+    const importedWorkflow = workflows.getProjectWorkflow(imported.id);
+    expect(importedWorkflow).toMatchObject({
+      projectId: imported.id,
+      designBrief: { markdown: '# Design Brief\n\nA portable comparison workflow.' },
+      conceptScreenSet: {
+        screens: [
+          { ordinal: 1, assetId: expect.any(String) },
+          { ordinal: 2, assetId: expect.any(String) },
+          { ordinal: 3, assetId: expect.any(String) },
+        ],
+      },
+      prd: { markdown: '# PRD\n\nThe Author can preserve a complete decision record.' },
+      candidate: {
+        status: 'paused',
+        currentStage: 'concept_screens',
+      },
+      snapshots: [{ preservedBy: 'promotion' }],
+      lastDesignBriefRun: {
+        model: sourceWorkflow.lastDesignBriefRun!.model,
+        stagePrompt: sourceWorkflow.lastDesignBriefRun!.stagePrompt,
+        requestId: 'req_project_export_brief',
+      },
+    });
+    expect(importedWorkflow.designBrief?.id).not.toBe(
+      sourceWorkflow.designBrief?.id,
+    );
+    for (const screen of importedWorkflow.conceptScreenSet!.screens) {
+      expect(workflows.getConceptScreenAsset(imported.id, screen.assetId))
+        .toEqual(pngs[screen.ordinal - 1]);
+    }
+    const importedSnapshot = workflows.getWorkflowSnapshot(
+      imported.id,
+      importedWorkflow.snapshots[0]!.id,
+    );
+    expect(importedSnapshot.conceptScreenSet?.screens).toHaveLength(3);
+    const resumedImport = await workflows.resumeFullWorkflow(imported.id);
+    expect(resumedImport.candidate).toMatchObject({
+      status: 'paused',
+      currentStage: 'prd',
+    });
+    await workflows.discardFullWorkflow(imported.id);
+    const restoredImport = workflows.restoreWorkflowSnapshot(
+      imported.id,
+      importedWorkflow.snapshots[0]!.id,
+    );
+    expect(restoredImport).toMatchObject({
+      designBrief: { markdown: '# Design Brief\n\nA portable comparison workflow.' },
+      conceptScreenSet: { screens: [{}, {}, {}] },
+      prd: { markdown: '# PRD\n\nThe Author can preserve a complete decision record.' },
+    });
+  });
+
+  it('imports a Project Export with fresh local identity and a collision-safe name', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory, {
+      now: () => new Date('2026-07-17T10:00:00.000Z'),
+    });
+    projectServices.push(projects);
+    const source = projects.createProject({
+      name: 'Portable Project',
+      insightSource: 'A local Project can be moved without a cloud account.',
+    });
+    const workflows = await openWorkflowService(dataDirectory, {
+      now: () => new Date('2026-07-17T10:05:00.000Z'),
+      textGeneration: {
+        async generateDesignBrief() {
+          throw new Error('Generation was not expected during import.');
+        },
+        async generatePrd() {
+          throw new Error('Generation was not expected during import.');
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    const exported = workflows.exportProject(source.id);
+
+    const imported = workflows.importProject(exported.bytes);
+
+    expect(imported).toEqual({
+      id: expect.any(String),
+      name: 'Portable Project (Imported)',
+      insightSource: source.insightSource,
+      createdAt: '2026-07-17T10:05:00.000Z',
+      updatedAt: '2026-07-17T10:05:00.000Z',
+    });
+    expect(imported.id).not.toBe(source.id);
+    expect(projects.listProjects()).toHaveLength(2);
+  });
+
+  it('rejects corrupted and broken-reference Project Exports without changing storage', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const source = projects.createProject({
+      name: 'Integrity Source',
+      insightSource: 'Only a completely valid Project Export may be imported.',
+    });
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          throw new Error('Generation was not expected during import.');
+        },
+        async generatePrd() {
+          throw new Error('Generation was not expected during import.');
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    const exported = workflows.exportProject(source.id);
+    const corruptedFiles = unzipSync(exported.bytes);
+    const corruptedPayload = JSON.parse(strFromU8(corruptedFiles['project.json'])) as {
+      project: { insightSource: string };
+    };
+    corruptedPayload.project.insightSource = 'Tampered after export';
+    corruptedFiles['project.json'] = strToU8(JSON.stringify(corruptedPayload));
+
+    expect(() => workflows.importProject(Buffer.from(zipSync(corruptedFiles))))
+      .toThrow('project.json failed its integrity check');
+    expect(projects.listProjects()).toHaveLength(1);
+
+    const brokenFiles = unzipSync(exported.bytes);
+    const brokenPayload = JSON.parse(strFromU8(brokenFiles['project.json'])) as {
+      currentWorkflow: { artifactIds: { designBrief?: string } };
+    };
+    brokenPayload.currentWorkflow.artifactIds.designBrief = 'missing-artifact';
+    brokenFiles['project.json'] = strToU8(`${JSON.stringify(brokenPayload)}\n`);
+    const manifest = JSON.parse(strFromU8(brokenFiles['manifest.json'])) as {
+      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
+    };
+    const projectIntegrity = manifest.integrity.files.find(({ path }) => path === 'project.json')!;
+    projectIntegrity.byteSize = brokenFiles['project.json'].byteLength;
+    projectIntegrity.sha256 = createHash('sha256')
+      .update(brokenFiles['project.json'])
+      .digest('hex');
+    brokenFiles['manifest.json'] = strToU8(`${JSON.stringify(manifest)}\n`);
+
+    expect(() => workflows.importProject(Buffer.from(zipSync(brokenFiles))))
+      .toThrow('does not reference a matching Artifact');
+    expect(projects.listProjects()).toHaveLength(1);
   });
 });

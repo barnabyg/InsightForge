@@ -53,6 +53,7 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
 
   const renamedCard = page.getByRole('article', {
     name: 'Confident retrofit choices',
+    exact: true,
   });
   const projectExportDownload = page.waitForEvent('download');
   await renamedCard.getByRole('link', { name: 'Export Project' }).click();
@@ -74,6 +75,15 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
       insightSource: '# Installer confidence\n\nQuotes hide important trade-offs.',
     },
   });
+
+  await page.getByLabel('Import Project file').setInputFiles({
+    name: 'confident-retrofit-choices-project-export.zip',
+    mimeType: 'application/zip',
+    buffer: await readFile(projectExportPath!),
+  });
+  await expect(
+    page.getByRole('article', { name: 'Confident retrofit choices (Imported)' }),
+  ).toBeVisible();
 
   await renamedCard.getByRole('button', { name: 'Duplicate project' }).click();
   await expect(
@@ -97,7 +107,7 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
   );
   await page.getByRole('link', { name: 'All projects' }).click();
   await page
-    .getByRole('article', { name: 'Confident retrofit choices' })
+    .getByRole('article', { name: 'Confident retrofit choices', exact: true })
     .getByRole('button', { name: /Confident retrofit choices/ })
     .click();
   await expect(page.getByRole('textbox', { name: 'Insight Source' })).toHaveValue(

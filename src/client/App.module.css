@@ -280,6 +280,26 @@ a {
   max-width: 760px;
 }
 
+.library-hero > .library-hero-actions {
+  max-width: none;
+  display: flex;
+  align-items: center;
+  flex: 0 0 auto;
+  gap: 8px;
+}
+
+.library-hero-actions .secondary-action {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+}
+
+.library-hero-actions .secondary-action[aria-disabled='true'] {
+  cursor: wait;
+  opacity: 0.58;
+}
+
 .library-hero h1 {
   max-width: 720px;
   margin: 0;
