@@ -557,7 +557,7 @@ export function ProjectWorkspace({
                     onClick={() => void openRevisionEditor().catch(() => undefined)}
                   >{workflow.workflow?.insightRevision
                       ? 'Resume Insight Revision'
-                      : 'Revise Insight'}</button>
+                      : 'Begin Insight Revision'}</button>
                 )}
                 <label className={`${styles['import-action']} ${insightLocked ? styles['import-action--disabled'] : ''}`}>
                   <span aria-hidden="true">↑</span> Import .txt or .md
@@ -593,7 +593,7 @@ export function ProjectWorkspace({
             </footer>
             {insightLocked && (
               <p className={styles['insight-lock-message']} id="insight-lock-message">
-                Insight Source is locked after generation. Use Revise Insight to prepare a replacement without changing the current workflow.
+                Insight Source is locked after generation. Begin an Insight Revision to prepare a replacement without changing the current workflow.
               </p>
             )}
             {importError && <p className={styles['inline-error']} role="alert">{importError}</p>}
@@ -969,7 +969,7 @@ export function ProjectWorkspace({
 
       {revisionEditorOpen && revisionDraft !== null && (
         <Modal
-          title="Revise Insight"
+          title="Edit Insight Revision"
           onDismiss={() => setRevisionEditorOpen(false)}
           actions={<>
             <button className={styles['secondary-action']} type="button" onClick={() => setRevisionEditorOpen(false)}>Close for now</button>
@@ -978,7 +978,7 @@ export function ProjectWorkspace({
                 setRevisionEditorOpen(false);
                 setRevisionDraft(null);
               }).catch(() => undefined);
-            }}>Discard revision</button>
+            }}>Discard Insight Revision</button>
             <button
               className={styles['primary-action']}
               type="button"
@@ -1010,27 +1010,27 @@ export function ProjectWorkspace({
                   ? 'Saving Insight Revision'
                   : 'Insight Revision save failed'}
             >{revisionSaveState === 'saved'
-                ? 'Revision saved locally'
+                ? 'Insight Revision saved locally'
                 : revisionSaveState === 'saving'
-                  ? 'Saving revision…'
-                  : 'Revision could not be saved'}</span>
+                  ? 'Saving Insight Revision…'
+                  : 'Insight Revision could not be saved'}</span>
           </div>
         </Modal>
       )}
 
       {confirmRevisionGeneration && (
         <Modal
-          title="Generate revised workflow?"
+          title="Generate Candidate Workflow?"
           onDismiss={() => setConfirmRevisionGeneration(false)}
           actions={<>
             <button className={styles['secondary-action']} type="button" onClick={() => {
               setConfirmRevisionGeneration(false);
               setRevisionEditorOpen(true);
-            }}>Back to revision</button>
+            }}>Back to Insight Revision</button>
             <button className={styles['primary-action']} type="button" onClick={() => {
               setConfirmRevisionGeneration(false);
               void generateRevision().catch(() => undefined);
-            }}>Generate revised workflow</button>
+            }}>Generate Candidate Workflow</button>
           </>}
         >
           <p>The revised Insight Source changes the input to the complete downstream chain:</p>
