@@ -321,6 +321,23 @@ export function ProjectWorkspace({
     return Boolean(workflow.workflow?.prd);
   }
 
+  function requestRegeneration(stageId: GeneratedStageId): void {
+    const startStage = rerunStartFor(stageId);
+    if (completeWorkflow) {
+      setConfirmRerun(startStage);
+    } else if (startStage === 'design_brief') {
+      if (workflow.workflow?.conceptScreenSet) {
+        setConfirmCascade(true);
+      } else {
+        void workflow.generateDesignBrief().catch(() => undefined);
+      }
+    } else if (startStage === 'concept_screens') {
+      void workflow.generateConceptScreens().catch(() => undefined);
+    } else {
+      void workflow.generatePrd().catch(() => undefined);
+    }
+  }
+
   function requestVariation(stageId: GeneratedStageId): void {
     if (completeWorkflow) {
       setConfirmRerun(stageId);
@@ -659,15 +676,7 @@ export function ProjectWorkspace({
                   disabled={workflow.loading || workflow.generating || (
                     !completeWorkflow && !workflow.workflow?.canGenerateDesignBrief
                   ) || (hasCurrentArtifact('design_brief') && !rerunPlan)}
-                  onClick={() => {
-                    if (completeWorkflow) {
-                      setConfirmRerun(rerunStartFor('design_brief'));
-                    } else if (workflow.workflow?.conceptScreenSet) {
-                      setConfirmCascade(true);
-                    } else {
-                      void workflow.generateDesignBrief().catch(() => undefined);
-                    }
-                  }}
+                  onClick={() => requestRegeneration('design_brief')}
                 >
                   {workflow.generating
                     ? 'Generating…'
@@ -757,13 +766,7 @@ export function ProjectWorkspace({
                     disabled={workflow.loading || workflow.generating || (
                       !completeWorkflow && !workflow.workflow?.canGenerateConceptScreens
                     ) || (hasCurrentArtifact('concept_screens') && !rerunPlan)}
-                    onClick={() => {
-                      if (completeWorkflow) {
-                        setConfirmRerun(rerunStartFor('concept_screens'));
-                      } else {
-                        void workflow.generateConceptScreens().catch(() => undefined);
-                      }
-                    }}
+                    onClick={() => requestRegeneration('concept_screens')}
                   >
                     {hasCurrentArtifact('concept_screens')
                       ? completeWorkflowActionLabel('concept_screens')
@@ -850,13 +853,7 @@ export function ProjectWorkspace({
                   disabled={workflow.loading || workflow.generating || (
                     !completeWorkflow && !workflow.workflow?.canGeneratePrd
                   ) || (hasCurrentArtifact('prd') && !rerunPlan)}
-                  onClick={() => {
-                    if (completeWorkflow) {
-                      setConfirmRerun(rerunStartFor('prd'));
-                    } else {
-                      void workflow.generatePrd().catch(() => undefined);
-                    }
-                  }}
+                  onClick={() => requestRegeneration('prd')}
                 >
                   {workflow.generatingStage === 'prd'
                     ? 'Generating…'
