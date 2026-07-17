@@ -944,6 +944,7 @@ export async function openWorkflowService(
     if (!selected) {
       throw new WorkflowValidationError('Workflow Snapshot was not found.');
     }
+    assertNoActiveGeneration(projectId);
     if (candidateRow(projectId) || insightRevisionRow(projectId)) {
       throw new WorkflowValidationError(
         'Resolve the active Candidate Workflow or Insight Revision before restoring history.',

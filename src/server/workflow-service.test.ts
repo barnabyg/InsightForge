@@ -1731,6 +1731,15 @@ describe('Workflow service', () => {
     const originalInsight = 'Renters need a clear way to compare neighbourhood trade-offs.';
     const revisedInsight = 'Renters need to compare neighbourhoods, commutes, and accessibility.';
     const project = projects.createProject({ insightSource: originalInsight });
+    let blockConceptGeneration = false;
+    let signalConceptStarted: () => void = () => {};
+    const conceptStarted = new Promise<void>((resolve) => {
+      signalConceptStarted = resolve;
+    });
+    let releaseConceptGeneration: () => void = () => {};
+    const conceptRelease = new Promise<void>((resolve) => {
+      releaseConceptGeneration = resolve;
+    });
     const workflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
         async generateDesignBrief(input) {
@@ -1752,6 +1761,10 @@ describe('Workflow service', () => {
       },
       imageGeneration: {
         async generateConceptScreen(input) {
+          if (blockConceptGeneration && input.ordinal === 1) {
+            signalConceptStarted();
+            await conceptRelease;
+          }
           return {
             png: pngFixture(input.ordinal * 45),
             requestId: `req_partial_revision_screen_${input.ordinal}`,
@@ -1783,6 +1796,19 @@ describe('Workflow service', () => {
         prd: null,
       },
     })]);
+
+    const partialSnapshotId = promoted.snapshots[0]!.id;
+    const restoredPartial = workflows.restoreWorkflowSnapshot(project.id, partialSnapshotId);
+    const completeSnapshotId = restoredPartial.snapshots[0]!.id;
+    blockConceptGeneration = true;
+    const guidedGeneration = workflows.generateConceptScreens(project.id);
+    await conceptStarted;
+
+    expect(() => workflows.restoreWorkflowSnapshot(project.id, completeSnapshotId))
+      .toThrow('Generation is already running for this Project.');
+
+    releaseConceptGeneration();
+    await guidedGeneration;
   });
 
   it('resumes a Candidate Workflow for an Insight Revision and promotes atomically', async () => {
