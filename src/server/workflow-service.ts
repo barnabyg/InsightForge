@@ -1186,6 +1186,71 @@ export async function openWorkflowService(
     }
   }
 
+  function assertNoActiveGeneration(projectId: string): void {
+    if (
+      activeDesignBriefRuns.has(projectId)
+      || activeConceptRuns.has(projectId)
+      || activePrdRuns.has(projectId)
+      || activeFullRuns.has(projectId)
+    ) {
+      throw new WorkflowValidationError(
+        'Generation is already running for this Project.',
+      );
+    }
+  }
+
+  function snapshotCandidateConfigurations(): CandidateConfigurations {
+    return {
+      designBrief: designBriefConfiguration(),
+      conceptScreens: conceptScreenConfiguration(),
+      prd: prdConfiguration(),
+    };
+  }
+
+  async function startCandidate(input: {
+    projectId: string;
+    runKind: RunKind;
+    startStage: GeneratedStageId;
+    insightSource: string;
+    insightRevisionId?: string;
+    designBrief?: ArtifactRow;
+    conceptScreens?: ArtifactRow;
+  }): Promise<ProjectWorkflow> {
+    const candidateId = randomUUID();
+    const startedAt = now().toISOString();
+    const completedOperationCount = input.startStage === 'design_brief'
+      ? 0
+      : input.startStage === 'concept_screens'
+        ? 1
+        : 4;
+    database.prepare(`
+      INSERT INTO workflow_candidates (
+        id, project_id, run_kind, status, current_stage, completed_operation_count,
+        start_stage, insight_source, insight_revision_id, configuration_json,
+        design_brief_run_id, design_brief_artifact_id,
+        concept_screen_run_id, concept_screen_artifact_id,
+        started_at, updated_at
+      ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(
+      candidateId,
+      input.projectId,
+      input.runKind,
+      input.startStage,
+      completedOperationCount,
+      input.startStage,
+      input.insightSource,
+      input.insightRevisionId ?? null,
+      JSON.stringify(snapshotCandidateConfigurations()),
+      input.designBrief?.run_id ?? null,
+      input.designBrief?.id ?? null,
+      input.conceptScreens?.run_id ?? null,
+      input.conceptScreens?.id ?? null,
+      startedAt,
+      startedAt,
+    );
+    return continueFullCandidate(requireCandidate(input.projectId, candidateId));
+  }
+
   const service: WorkflowService = {
     getProjectWorkflow(projectId) {
       return readProjectWorkflow(projectId);
@@ -2278,42 +2343,18 @@ export async function openWorkflowService(
           'Resume or discard the existing Candidate Workflow first.',
         );
       }
-      if (
-        activeDesignBriefRuns.has(projectId)
-        || activeConceptRuns.has(projectId)
-        || activePrdRuns.has(projectId)
-        || activeFullRuns.has(projectId)
-      ) {
-        throw new WorkflowValidationError(
-          'Generation is already running for this Project.',
-        );
-      }
+      assertNoActiveGeneration(projectId);
       if (pendingDesignBriefCandidate(projectId)) {
         throw new WorkflowValidationError(
           'Finish the pending guided cascade before starting Full Generation.',
         );
       }
-      const candidateId = randomUUID();
-      const startedAt = now().toISOString();
-      const configurations: CandidateConfigurations = {
-        designBrief: designBriefConfiguration(),
-        conceptScreens: conceptScreenConfiguration(),
-        prd: prdConfiguration(),
-      };
-      database.prepare(`
-        INSERT INTO workflow_candidates (
-          id, project_id, status, current_stage, completed_operation_count,
-          start_stage, insight_source, configuration_json, started_at, updated_at
-        ) VALUES (?, ?, 'running', 'design_brief', 0, 'design_brief', ?, ?, ?, ?)
-      `).run(
-        candidateId,
+      return startCandidate({
         projectId,
-        project.insight_source,
-        JSON.stringify(configurations),
-        startedAt,
-        startedAt,
-      );
-      return continueFullCandidate(requireCandidate(projectId, candidateId));
+        runKind: 'initial',
+        startStage: 'design_brief',
+        insightSource: project.insight_source,
+      });
     },
 
     async regenerateWorkflow(projectId, startStage) {
@@ -2326,16 +2367,7 @@ export async function openWorkflowService(
           'Resume or discard the existing Candidate Workflow first.',
         );
       }
-      if (
-        activeDesignBriefRuns.has(projectId)
-        || activeConceptRuns.has(projectId)
-        || activePrdRuns.has(projectId)
-        || activeFullRuns.has(projectId)
-      ) {
-        throw new WorkflowValidationError(
-          'Generation is already running for this Project.',
-        );
-      }
+      assertNoActiveGeneration(projectId);
       const currentDesignBrief = currentArtifact(projectId, 'design_brief');
       const currentConceptScreens = currentArtifact(projectId, 'concept_screens');
       const currentPrd = currentArtifact(projectId, 'prd');
@@ -2353,45 +2385,16 @@ export async function openWorkflowService(
           `Regenerate from ${generatedStageNames[update.earliestChangedStage]} to begin at the earliest changed stage.`,
         );
       }
-      const candidateId = randomUUID();
-      const startedAt = now().toISOString();
       const runKind: RunKind = update ? 'regeneration' : 'variation';
-      const configurations: CandidateConfigurations = {
-        designBrief: designBriefConfiguration(),
-        conceptScreens: conceptScreenConfiguration(),
-        prd: prdConfiguration(),
-      };
       const startsAtIndex = generatedStageIds.indexOf(startStage);
-      const completedOperationCount = startStage === 'design_brief'
-        ? 0
-        : startStage === 'concept_screens'
-          ? 1
-          : 4;
-      database.prepare(`
-        INSERT INTO workflow_candidates (
-          id, project_id, run_kind, status, current_stage, completed_operation_count,
-          start_stage, insight_source, configuration_json,
-          design_brief_run_id, design_brief_artifact_id,
-          concept_screen_run_id, concept_screen_artifact_id,
-          started_at, updated_at
-        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(
-        candidateId,
+      return startCandidate({
         projectId,
         runKind,
         startStage,
-        completedOperationCount,
-        startStage,
-        project.insight_source,
-        JSON.stringify(configurations),
-        startsAtIndex > 0 ? currentDesignBrief.run_id : null,
-        startsAtIndex > 0 ? currentDesignBrief.id : null,
-        startsAtIndex > 1 ? currentConceptScreens.run_id : null,
-        startsAtIndex > 1 ? currentConceptScreens.id : null,
-        startedAt,
-        startedAt,
-      );
-      return continueFullCandidate(requireCandidate(projectId, candidateId));
+        insightSource: project.insight_source,
+        designBrief: startsAtIndex > 0 ? currentDesignBrief : undefined,
+        conceptScreens: startsAtIndex > 1 ? currentConceptScreens : undefined,
+      });
     },
 
     beginInsightRevision(projectId) {
@@ -2462,40 +2465,14 @@ export async function openWorkflowService(
           'Resume or discard the existing Candidate Workflow first.',
         );
       }
-      if (
-        activeDesignBriefRuns.has(projectId)
-        || activeConceptRuns.has(projectId)
-        || activePrdRuns.has(projectId)
-        || activeFullRuns.has(projectId)
-      ) {
-        throw new WorkflowValidationError(
-          'Generation is already running for this Project.',
-        );
-      }
-      const candidateId = randomUUID();
-      const startedAt = now().toISOString();
-      const configurations: CandidateConfigurations = {
-        designBrief: designBriefConfiguration(),
-        conceptScreens: conceptScreenConfiguration(),
-        prd: prdConfiguration(),
-      };
-      database.prepare(`
-        INSERT INTO workflow_candidates (
-          id, project_id, run_kind, status, current_stage, completed_operation_count,
-          start_stage, insight_source, insight_revision_id, configuration_json,
-          started_at, updated_at
-        ) VALUES (?, ?, 'regeneration', 'running', 'design_brief', 0,
-                  'design_brief', ?, ?, ?, ?, ?)
-      `).run(
-        candidateId,
+      assertNoActiveGeneration(projectId);
+      return startCandidate({
         projectId,
-        revision.insight_source,
-        revision.id,
-        JSON.stringify(configurations),
-        startedAt,
-        startedAt,
-      );
-      return continueFullCandidate(requireCandidate(projectId, candidateId));
+        runKind: 'regeneration',
+        startStage: 'design_brief',
+        insightSource: revision.insight_source,
+        insightRevisionId: revision.id,
+      });
     },
 
     discardInsightRevision(projectId) {
