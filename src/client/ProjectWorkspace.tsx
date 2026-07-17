@@ -315,14 +315,36 @@ export function ProjectWorkspace({
       : `Regenerate from ${generatedStageNames[startStage]}`;
   }
 
+  function hasCurrentArtifact(stageId: GeneratedStageId): boolean {
+    if (stageId === 'design_brief') return Boolean(workflow.workflow?.designBrief);
+    if (stageId === 'concept_screens') return Boolean(workflow.workflow?.conceptScreenSet);
+    return Boolean(workflow.workflow?.prd);
+  }
+
+  function requestVariation(stageId: GeneratedStageId): void {
+    if (completeWorkflow) {
+      setConfirmRerun(stageId);
+    } else if (stageId === 'design_brief') {
+      if (workflow.workflow?.conceptScreenSet) {
+        setConfirmCascade(true);
+      } else {
+        void workflow.generateDesignBrief().catch(() => undefined);
+      }
+    } else if (stageId === 'concept_screens') {
+      void workflow.generateConceptScreens().catch(() => undefined);
+    } else {
+      void workflow.generatePrd().catch(() => undefined);
+    }
+  }
+
   function variationAction(stageId: GeneratedStageId) {
-    if (!completeWorkflow || rerunPlan) return null;
+    if (rerunPlan || !hasCurrentArtifact(stageId)) return null;
     return (
       <button
         className={`${styles['secondary-action']} ${styles['variation-action']}`}
         type="button"
         disabled={workflow.loading || workflow.generating}
-        onClick={() => setConfirmRerun(stageId)}
+        onClick={() => requestVariation(stageId)}
       >Generate another variation</button>
     );
   }
@@ -636,7 +658,7 @@ export function ProjectWorkspace({
                   type="button"
                   disabled={workflow.loading || workflow.generating || (
                     !completeWorkflow && !workflow.workflow?.canGenerateDesignBrief
-                  ) || (completeWorkflow && !rerunPlan)}
+                  ) || (hasCurrentArtifact('design_brief') && !rerunPlan)}
                   onClick={() => {
                     if (completeWorkflow) {
                       setConfirmRerun(rerunStartFor('design_brief'));
@@ -649,10 +671,8 @@ export function ProjectWorkspace({
                 >
                   {workflow.generating
                     ? 'Generating…'
-                    : completeWorkflow
+                    : hasCurrentArtifact('design_brief')
                       ? completeWorkflowActionLabel('design_brief')
-                      : workflow.workflow?.designBrief
-                      ? 'Generate another variation'
                       : 'Generate Design Brief'}
                 </button>
                 {variationAction('design_brief')}
@@ -736,7 +756,7 @@ export function ProjectWorkspace({
                     type="button"
                     disabled={workflow.loading || workflow.generating || (
                       !completeWorkflow && !workflow.workflow?.canGenerateConceptScreens
-                    ) || (completeWorkflow && !rerunPlan)}
+                    ) || (hasCurrentArtifact('concept_screens') && !rerunPlan)}
                     onClick={() => {
                       if (completeWorkflow) {
                         setConfirmRerun(rerunStartFor('concept_screens'));
@@ -745,15 +765,13 @@ export function ProjectWorkspace({
                       }
                     }}
                   >
-                    {completeWorkflow
+                    {hasCurrentArtifact('concept_screens')
                       ? completeWorkflowActionLabel('concept_screens')
                       : workflow.workflow?.lastConceptScreenRun
                       && workflow.workflow.lastConceptScreenRun.status !== 'succeeded'
                       && workflow.workflow.lastConceptScreenRun.completedOperationCount < 3
                       ? `Resume from Screen ${workflow.workflow.lastConceptScreenRun.completedOperationCount + 1}`
-                      : workflow.workflow?.conceptScreenSet
-                        ? 'Generate another variation'
-                        : 'Generate Concept Screens'}
+                      : 'Generate Concept Screens'}
                   </button>
                 )}
                 {workflow.generatingStage !== 'concept_screens'
@@ -831,7 +849,7 @@ export function ProjectWorkspace({
                   type="button"
                   disabled={workflow.loading || workflow.generating || (
                     !completeWorkflow && !workflow.workflow?.canGeneratePrd
-                  ) || (completeWorkflow && !rerunPlan)}
+                  ) || (hasCurrentArtifact('prd') && !rerunPlan)}
                   onClick={() => {
                     if (completeWorkflow) {
                       setConfirmRerun(rerunStartFor('prd'));
@@ -842,10 +860,8 @@ export function ProjectWorkspace({
                 >
                   {workflow.generatingStage === 'prd'
                     ? 'Generating…'
-                    : completeWorkflow
+                    : hasCurrentArtifact('prd')
                       ? completeWorkflowActionLabel('prd')
-                      : workflow.workflow?.prd
-                      ? 'Generate another variation'
                       : 'Generate PRD'}
                 </button>
                 {variationAction('prd')}

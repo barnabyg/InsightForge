@@ -47,6 +47,7 @@ test('Author generates and inspects a persisted coordinated Concept Screen Set',
   await focus.getByRole('button', { name: 'Close' }).click();
 
   await page.getByRole('button', { name: /Design Brief/ }).click();
+  await expect(page.getByRole('button', { name: 'Regenerate from here' })).toBeDisabled();
   await page.getByRole('button', { name: 'Generate another variation' }).click();
   const cascadePreview = page.getByRole('dialog', { name: 'Rerun downstream workflow?' });
   await expect(cascadePreview).toContainText('new Design Brief');
