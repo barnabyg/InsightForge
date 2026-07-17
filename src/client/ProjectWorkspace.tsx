@@ -254,10 +254,28 @@ export function ProjectWorkspace({
     setRevisionEditorOpen(true);
   }
 
-  async function reviewRevisionGeneration(): Promise<void> {
+  async function flushRevisionDraft(): Promise<void> {
     if (revisionDraft === null) return;
+    if (revisionDraft === workflow.workflow?.insightRevision?.insightSource) {
+      setRevisionSaveState('saved');
+      return;
+    }
+    setRevisionSaveState('saving');
     await workflow.updateInsightRevision(revisionDraft);
     setRevisionSaveState('saved');
+  }
+
+  async function closeRevisionEditor(): Promise<void> {
+    try {
+      await flushRevisionDraft();
+      setRevisionEditorOpen(false);
+    } catch {
+      setRevisionSaveState('error');
+    }
+  }
+
+  async function reviewRevisionGeneration(): Promise<void> {
+    await flushRevisionDraft();
     setRevisionEditorOpen(false);
     setConfirmRevisionGeneration(true);
   }
@@ -976,12 +994,12 @@ export function ProjectWorkspace({
       {revisionEditorOpen && revisionDraft !== null && (
         <Modal
           title="Edit Insight Revision"
-          onDismiss={() => setRevisionEditorOpen(false)}
+          onDismiss={() => void closeRevisionEditor()}
           actions={<>
-            <button className={styles['secondary-action']} type="button" onClick={() => setRevisionEditorOpen(false)}>Close for now</button>
+            <button className={styles['secondary-action']} type="button" onClick={() => void closeRevisionEditor()}>Close for now</button>
             <button className={styles['danger-action']} type="button" onClick={() => {
+              setRevisionEditorOpen(false);
               void workflow.discardInsightRevision().then(() => {
-                setRevisionEditorOpen(false);
                 setRevisionDraft(null);
               }).catch(() => undefined);
             }}>Discard Insight Revision</button>

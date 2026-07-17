@@ -178,7 +178,12 @@ test('Author completes an Insight Revision without exposing mixed workflow state
   const revisionEditor = page.getByRole('dialog', { name: 'Edit Insight Revision' });
   await revisionEditor.getByRole('textbox', { name: 'Revised Insight Source' })
     .fill(revisedInsight);
-  await expect(revisionEditor.getByRole('status', { name: 'Insight Revision saved' }))
+  await revisionEditor.getByRole('button', { name: 'Close for now' }).click();
+  await page.getByRole('button', { name: 'Resume Insight Revision' }).click();
+  const flushedEditor = page.getByRole('dialog', { name: 'Edit Insight Revision' });
+  await expect(flushedEditor.getByRole('textbox', { name: 'Revised Insight Source' }))
+    .toHaveValue(revisedInsight);
+  await expect(flushedEditor.getByRole('status', { name: 'Insight Revision saved' }))
     .toBeVisible();
 
   await page.reload();
