@@ -1,4 +1,5 @@
 import type { ConceptScreenProgressEvent, ConceptScreenRun } from '../shared/generation.js';
+import { runKindLabel } from './runPresentation.js';
 import styles from './App.module.css';
 
 interface ConceptScreenRunInspectorProps {
@@ -67,7 +68,7 @@ export function ConceptScreenRunInspector({
             <span aria-hidden="true" /> {statusLabel(run.status)}
           </div>
           <dl className={styles['inspector-facts']}>
-            <div><dt>Run type</dt><dd>{run.runKind === 'variation' ? 'Variation Run' : run.runKind === 'regeneration' ? 'Regeneration' : 'Initial Run'}</dd></div>
+            <div><dt>Run type</dt><dd>{runKindLabel(run.runKind)}</dd></div>
             <div><dt>Model</dt><dd>{run.model}</dd></div>
             <div><dt>Quality</dt><dd>{run.imageQuality[0].toUpperCase() + run.imageQuality.slice(1)}</dd></div>
             <div><dt>Progress</dt><dd>{run.completedOperationCount} of 3 PNGs</dd></div>

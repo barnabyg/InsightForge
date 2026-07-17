@@ -1,4 +1,5 @@
 import type { DesignBriefRun, PrdRun } from '../shared/generation.js';
+import { runKindLabel } from './runPresentation.js';
 import styles from './App.module.css';
 
 interface RunInspectorProps {
@@ -36,7 +37,7 @@ export function RunInspector({ run, generating, elapsedSeconds, stageName }: Run
           </div>
 
           <dl className={styles['inspector-facts']}>
-            <div><dt>Run type</dt><dd>{run.runKind === 'variation' ? 'Variation Run' : run.runKind === 'regeneration' ? 'Regeneration' : 'Initial Run'}</dd></div>
+            <div><dt>Run type</dt><dd>{runKindLabel(run.runKind)}</dd></div>
             <div><dt>Model</dt><dd>{run.model}</dd></div>
             <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
             <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString('en-GB')}</time></dd></div>
