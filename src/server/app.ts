@@ -29,6 +29,7 @@ import type { ApplicationMode } from '../shared/bootstrap.js';
 
 export interface BuildAppOptions {
   dataDirectory?: string;
+  generateImportId?: () => string;
   mode?: ApplicationMode;
   apiKey?: string;
   now?: () => Date;
@@ -94,6 +95,7 @@ export async function buildApp(
             },
           });
   const workflowService = await openWorkflowService(dataDirectory, {
+    generateImportId: options.generateImportId,
     now,
     textGeneration,
     imageGeneration: options.imageGeneration

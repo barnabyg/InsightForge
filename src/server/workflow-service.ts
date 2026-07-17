@@ -52,6 +52,7 @@ import {
 export { GenerationBoundaryError } from './generation-boundary.js';
 
 interface WorkflowServiceOptions {
+  generateImportId?: () => string;
   imageGeneration?: ImageGenerationBoundary;
   now?: () => Date;
   textGeneration: TextGenerationBoundary;
@@ -2025,7 +2026,13 @@ export async function openWorkflowService(
     },
 
     importProject(archive) {
-      return importProjectExport(database, dataDirectory, archive, now());
+      return importProjectExport(
+        database,
+        dataDirectory,
+        archive,
+        now(),
+        options.generateImportId,
+      );
     },
 
     exportDeliverables(projectId) {

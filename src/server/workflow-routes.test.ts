@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -661,5 +661,72 @@ describe('Workflow HTTP API', () => {
       code: 'project_import_archive_invalid',
       error: 'The selected file is not a readable Project Export archive.',
     });
+  });
+
+  it('rolls back an HTTP import when asset persistence fails after writes begin', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const plannedIds = Array.from({ length: 16 }, (_, index) =>
+      `10000000-0000-4000-8000-${String(index + 1).padStart(12, '0')}`);
+    const importedProjectId = plannedIds[0]!;
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'mock',
+      generateImportId: () => plannedIds.shift()!,
+    });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Rollback Source',
+        insightSource: 'A failed import must not leave a partial Project.',
+      },
+    });
+    const sourceId = created.json().id as string;
+    for (const path of ['design-brief-runs', 'concept-screen-runs']) {
+      const generated = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${sourceId}/${path}`,
+        headers: { host: 'localhost:4317' },
+      });
+      expect(generated.statusCode).toBe(201);
+    }
+    const exported = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${sourceId}/export`,
+      headers: { host: 'localhost:4317' },
+    });
+    const collidingDirectory = join(
+      dataDirectory,
+      'assets',
+      `import-${importedProjectId}`,
+    );
+    await mkdir(collidingDirectory);
+    await writeFile(join(collidingDirectory, 'existing.txt'), 'pre-existing');
+
+    const imported = await app.inject({
+      method: 'POST',
+      url: '/api/project-imports',
+      headers: {
+        host: 'localhost:4317',
+        'content-type': 'application/zip',
+      },
+      payload: exported.rawPayload,
+    });
+
+    expect(imported.statusCode).toBe(400);
+    expect(imported.json()).toMatchObject({
+      code: 'project_import_persistence_failed',
+      error: expect.stringContaining('storage was left unchanged'),
+    });
+    const library = await app.inject({
+      method: 'GET',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+    });
+    expect(library.json()).toHaveLength(1);
+    expect(library.json()[0]).toMatchObject({ id: sourceId, name: 'Rollback Source' });
   });
 });

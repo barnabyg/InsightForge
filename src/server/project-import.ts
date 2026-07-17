@@ -765,8 +765,11 @@ function collisionSafeName(database: DatabaseSync, requestedName: string): strin
   }
 }
 
-function idMap<T extends { id: string }>(records: T[]): Map<string, string> {
-  return new Map(records.map(({ id }) => [id, randomUUID()]));
+function idMap<T extends { id: string }>(
+  records: T[],
+  generateId: () => string,
+): Map<string, string> {
+  return new Map(records.map(({ id }) => [id, generateId()]));
 }
 
 function remapNullable(map: Map<string, string>, value: string | null): string | null {
@@ -803,6 +806,7 @@ export function importProjectExport(
   dataDirectory: string,
   archive: Buffer,
   importedAt: Date,
+  generateId: () => string = randomUUID,
 ): Project {
   let files: Record<string, Uint8Array>;
   try {
@@ -817,15 +821,15 @@ export function importProjectExport(
   const payload = parseProjectExport(files, manifest);
   validateReferences(payload, files);
 
-  const projectId = randomUUID();
+  const projectId = generateId();
   const name = collisionSafeName(database, payload.project.name);
   const timestamp = importedAt.toISOString();
-  const runIds = idMap(payload.stageRuns);
-  const artifactIds = idMap(payload.artifacts);
-  const revisionIds = idMap(payload.insightRevisions);
-  const candidateIds = idMap(payload.candidates);
-  const snapshotIds = idMap(payload.workflowSnapshots);
-  const assetIds = idMap(payload.binaryAssets);
+  const runIds = idMap(payload.stageRuns, generateId);
+  const artifactIds = idMap(payload.artifacts, generateId);
+  const revisionIds = idMap(payload.insightRevisions, generateId);
+  const candidateIds = idMap(payload.candidates, generateId);
+  const snapshotIds = idMap(payload.workflowSnapshots, generateId);
+  const assetIds = idMap(payload.binaryAssets, generateId);
   const remapMaps = [runIds, artifactIds, revisionIds, candidateIds, snapshotIds, assetIds];
   const importDirectoryName = `import-${projectId}`;
   const stagingDirectory = join(dataDirectory, 'assets', `.${importDirectoryName}`);
