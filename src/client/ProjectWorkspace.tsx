@@ -311,11 +311,23 @@ export function ProjectWorkspace({
   }
 
   function completeWorkflowActionLabel(stageId: GeneratedStageId): string {
-    if (!rerunPlan) return 'Generate another variation';
+    if (!rerunPlan) return 'Regenerate from here';
     const startStage = rerunStartFor(stageId);
     return startStage === stageId
       ? 'Regenerate from here'
       : `Regenerate from ${generatedStageNames[startStage]}`;
+  }
+
+  function variationAction(stageId: GeneratedStageId) {
+    if (!completeWorkflow || rerunPlan) return null;
+    return (
+      <button
+        className={`${styles['secondary-action']} ${styles['variation-action']}`}
+        type="button"
+        disabled={workflow.loading || workflow.generating}
+        onClick={() => setConfirmRerun(stageId)}
+      >Generate another variation</button>
+    );
   }
 
   function updateAvailableNotice(stageId: GeneratedStageId) {
@@ -493,7 +505,9 @@ export function ProjectWorkspace({
               </div>
               {!candidate && workflow.generatingStage !== 'full_generation' && (
                 <button
-                  className={styles['primary-action']}
+                  className={completeWorkflow && !rerunPlan
+                    ? styles['secondary-action']
+                    : styles['primary-action']}
                   type="button"
                   disabled={!insight.trim() || saveState === 'saving'}
                   onClick={() => {
@@ -625,7 +639,7 @@ export function ProjectWorkspace({
                   type="button"
                   disabled={workflow.loading || workflow.generating || (
                     !completeWorkflow && !workflow.workflow?.canGenerateDesignBrief
-                  )}
+                  ) || (completeWorkflow && !rerunPlan)}
                   onClick={() => {
                     if (completeWorkflow) {
                       setConfirmRerun(rerunStartFor('design_brief'));
@@ -644,6 +658,7 @@ export function ProjectWorkspace({
                       ? 'Generate another variation'
                       : 'Generate Design Brief'}
                 </button>
+                {variationAction('design_brief')}
               </section>
 
               {updateAvailableNotice('design_brief')}
@@ -724,7 +739,7 @@ export function ProjectWorkspace({
                     type="button"
                     disabled={workflow.loading || workflow.generating || (
                       !completeWorkflow && !workflow.workflow?.canGenerateConceptScreens
-                    )}
+                    ) || (completeWorkflow && !rerunPlan)}
                     onClick={() => {
                       if (completeWorkflow) {
                         setConfirmRerun(rerunStartFor('concept_screens'));
@@ -744,6 +759,8 @@ export function ProjectWorkspace({
                         : 'Generate Concept Screens'}
                   </button>
                 )}
+                {workflow.generatingStage !== 'concept_screens'
+                  && variationAction('concept_screens')}
               </section>
 
               {updateAvailableNotice('concept_screens')}
@@ -817,7 +834,7 @@ export function ProjectWorkspace({
                   type="button"
                   disabled={workflow.loading || workflow.generating || (
                     !completeWorkflow && !workflow.workflow?.canGeneratePrd
-                  )}
+                  ) || (completeWorkflow && !rerunPlan)}
                   onClick={() => {
                     if (completeWorkflow) {
                       setConfirmRerun(rerunStartFor('prd'));
@@ -834,6 +851,7 @@ export function ProjectWorkspace({
                       ? 'Generate another variation'
                       : 'Generate PRD'}
                 </button>
+                {variationAction('prd')}
               </section>
 
               {updateAvailableNotice('prd')}

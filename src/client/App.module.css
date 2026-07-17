@@ -1625,7 +1625,7 @@ a {
   margin-bottom: 18px;
   padding: 16px 18px;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 18px;
   border: 1px solid var(--line);
@@ -1661,7 +1661,8 @@ a {
   white-space: nowrap;
 }
 
-.stage-action-card .primary-action {
+.stage-action-card .primary-action,
+.stage-action-card .variation-action {
   min-height: 42px;
 }
 
@@ -2307,7 +2308,8 @@ a {
     grid-template-columns: minmax(0, 1fr) auto;
   }
 
-  .stage-action-card .primary-action {
+  .stage-action-card .primary-action,
+  .stage-action-card .variation-action {
     grid-column: 1 / -1;
   }
 
