@@ -103,7 +103,7 @@ export function ProjectWorkspace({
   const [insight, setInsight] = useState(project.insightSource);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
-  const [confirmCascade, setConfirmCascade] = useState(false);
+  const [confirmCascade, setConfirmCascade] = useState<'regeneration' | 'variation' | null>(null);
   const [confirmRerun, setConfirmRerun] = useState<GeneratedStageId | null>(null);
   const [confirmFullGeneration, setConfirmFullGeneration] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
@@ -327,7 +327,7 @@ export function ProjectWorkspace({
       setConfirmRerun(startStage);
     } else if (startStage === 'design_brief') {
       if (workflow.workflow?.conceptScreenSet) {
-        setConfirmCascade(true);
+        setConfirmCascade('regeneration');
       } else {
         void workflow.generateDesignBrief().catch(() => undefined);
       }
@@ -343,7 +343,7 @@ export function ProjectWorkspace({
       setConfirmRerun(stageId);
     } else if (stageId === 'design_brief') {
       if (workflow.workflow?.conceptScreenSet) {
-        setConfirmCascade(true);
+        setConfirmCascade('variation');
       } else {
         void workflow.generateDesignBrief().catch(() => undefined);
       }
@@ -909,17 +909,25 @@ export function ProjectWorkspace({
 
       {confirmCascade && (
         <Modal
-          title="Rerun downstream workflow?"
-          onDismiss={() => setConfirmCascade(false)}
+          title={confirmCascade === 'variation'
+            ? 'Generate another Design Brief variation?'
+            : 'Rerun downstream workflow?'}
+          onDismiss={() => setConfirmCascade(null)}
           actions={<>
-            <button className={styles['secondary-action']} type="button" onClick={() => setConfirmCascade(false)}>Cancel</button>
+            <button className={styles['secondary-action']} type="button" onClick={() => setConfirmCascade(null)}>Cancel</button>
             <button className={styles['primary-action']} type="button" onClick={() => {
-              setConfirmCascade(false);
+              setConfirmCascade(null);
               void workflow.generateDesignBrief().catch(() => undefined);
-            }}>Rerun Design Brief and Concept Screens</button>
+            }}>{confirmCascade === 'variation'
+                ? 'Generate Variation Run and Concept Screens'
+                : 'Rerun Design Brief and Concept Screens'}</button>
           </>}
         >
-          <p>This cascade will generate a new Design Brief and then three new Concept Screens.</p>
+          {confirmCascade === 'variation' ? (
+            <p>The Design Brief input and configuration are unchanged, so its new run will be recorded as a <strong>Variation Run</strong>. It will then generate three new Concept Screens to keep downstream lineage coherent.</p>
+          ) : (
+            <p>This cascade will generate a new Design Brief and then three new Concept Screens.</p>
+          )}
           <p>The current Design Brief and Concept Screen Set remain available unless the complete cascade succeeds.</p>
         </Modal>
       )}
