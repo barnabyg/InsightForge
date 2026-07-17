@@ -34,6 +34,12 @@ export function WorkflowHistoryDrawer({
     };
   }, []);
 
+  useEffect(() => {
+    if (selected && !snapshots.some(({ id }) => id === selected.id)) {
+      setSelected(null);
+    }
+  }, [selected, snapshots]);
+
   async function inspect(snapshotId: string) {
     setLoading(true);
     setError(null);

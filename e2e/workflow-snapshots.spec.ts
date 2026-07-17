@@ -59,9 +59,13 @@ test('Author inspects, restores, and deletes Workflow Snapshots from compact his
   const updatedHistory = page.getByRole('complementary', { name: 'Workflow history' });
   const restorationSnapshot = updatedHistory.getByRole('article').first();
   await expect(restorationSnapshot).toContainText('Preserved before snapshot restoration');
-  await restorationSnapshot.getByRole('button', { name: 'Delete snapshot' }).click();
+  await restorationSnapshot.getByRole('button', { name: 'Inspect snapshot' }).click();
+  await expect(updatedHistory.getByRole('heading', { name: 'Snapshot inspection' })).toBeVisible();
+  await updatedHistory.getByRole('button', { name: 'Delete snapshot' }).click();
   const deletion = page.getByRole('dialog', { name: 'Delete Workflow Snapshot?' });
   await expect(deletion).toContainText('unreferenced Concept Screen files');
   await deletion.getByRole('button', { name: 'Delete Workflow Snapshot' }).click();
   await expect(page.getByRole('button', { name: 'Workflow history, 1 snapshot' })).toBeVisible();
+  await expect(updatedHistory.getByRole('heading', { name: 'Workflow Snapshots' })).toBeVisible();
+  await expect(updatedHistory.getByRole('heading', { name: 'Snapshot inspection' })).toHaveCount(0);
 });
