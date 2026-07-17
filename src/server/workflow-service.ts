@@ -162,6 +162,30 @@ interface CandidateConfigurations {
   prd: ConfigurationRow;
 }
 
+function buildPrdStageInput(
+  designBrief: ArtifactRow,
+  conceptScreenSet: Pick<ArtifactRow, 'id' | 'run_id'>,
+  operations: ConceptOperationRow[],
+): PrdRun['stageInput'] {
+  return {
+    designBrief: {
+      value: designBrief.markdown,
+      artifactId: designBrief.id,
+      runId: designBrief.run_id,
+    },
+    conceptScreenSet: {
+      artifactId: conceptScreenSet.id,
+      runId: conceptScreenSet.run_id,
+      screens: operations.map((operation) => ({
+        assetId: operation.asset_id!,
+        ordinal: operation.ordinal,
+        width: operation.width!,
+        height: operation.height!,
+      })),
+    },
+  };
+}
+
 export interface WorkflowService {
   getProjectWorkflow(projectId: string): ProjectWorkflow;
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
@@ -841,26 +865,12 @@ export async function openWorkflowService(
       const designBrief = currentArtifact(projectId, 'design_brief');
       const conceptScreenSet = currentArtifact(projectId, 'concept_screens');
       if (!designBrief || !conceptScreenSet) return null;
-      const screens = conceptOperations(conceptScreenSet.run_id)
-        .filter((operation) => operation.status === 'succeeded')
-        .map((operation) => ({
-          assetId: operation.asset_id!,
-          ordinal: operation.ordinal,
-          width: operation.width!,
-          height: operation.height!,
-        }));
-      currentInput = JSON.stringify({
-        designBrief: {
-          value: designBrief.markdown,
-          artifactId: designBrief.id,
-          runId: designBrief.run_id,
-        },
-        conceptScreenSet: {
-          artifactId: conceptScreenSet.id,
-          runId: conceptScreenSet.run_id,
-          screens,
-        },
-      });
+      currentInput = JSON.stringify(buildPrdStageInput(
+        designBrief,
+        conceptScreenSet,
+        conceptOperations(conceptScreenSet.run_id)
+          .filter((operation) => operation.status === 'succeeded'),
+      ));
       configuration = prdConfiguration();
     }
     return {
@@ -2135,23 +2145,11 @@ export async function openWorkflowService(
       const configuration = candidate
         ? candidateConfigurations(candidate).prd
         : prdConfiguration();
-      const stageInput: PrdRun['stageInput'] = {
-        designBrief: {
-          value: designBrief.markdown,
-          artifactId: designBrief.id,
-          runId: designBrief.run_id,
-        },
-        conceptScreenSet: {
-          artifactId: conceptScreenSet.id,
-          runId: conceptScreenSet.run_id,
-          screens: operations.map((operation) => ({
-            assetId: operation.asset_id!,
-            ordinal: operation.ordinal,
-            width: operation.width!,
-            height: operation.height!,
-          })),
-        },
-      };
+      const stageInput = buildPrdStageInput(
+        designBrief,
+        conceptScreenSet,
+        operations,
+      );
       const runKind = classifyStageRun(projectId, 'prd', {
         input: JSON.stringify(stageInput),
         prompt: configuration.prompt,
