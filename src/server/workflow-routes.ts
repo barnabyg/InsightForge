@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
+import type { GeneratedStageId } from '../shared/generation.js';
 import {
   WorkflowGenerationError,
   WorkflowProjectNotFoundError,
@@ -8,6 +9,10 @@ import {
 
 interface ProjectParameters {
   id: string;
+}
+
+interface WorkflowRerunBody {
+  stageId: GeneratedStageId;
 }
 
 export interface WorkflowRouteOptions {
@@ -159,6 +164,22 @@ export function registerWorkflowRoutes(
       try {
         await options.beforeGeneration?.();
         const workflow = await workflows.generateFullWorkflow(request.params.id);
+        return reply.status(201).send(workflow);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: ProjectParameters; Body: WorkflowRerunBody }>(
+    '/api/projects/:id/workflow-reruns',
+    async (request, reply) => {
+      try {
+        await options.beforeGeneration?.();
+        const workflow = await workflows.regenerateWorkflow(
+          request.params.id,
+          request.body?.stageId,
+        );
         return reply.status(201).send(workflow);
       } catch (error) {
         return handleWorkflowError(error, reply);

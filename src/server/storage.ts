@@ -44,7 +44,7 @@ export async function initializeStorage(
         value TEXT NOT NULL
       );
       INSERT INTO app_metadata (key, value)
-      VALUES ('schema_version', '3')
+      VALUES ('schema_version', '4')
       ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
       CREATE TABLE IF NOT EXISTS projects (
@@ -84,6 +84,8 @@ export async function initializeStorage(
         project_id TEXT NOT NULL
           REFERENCES projects(id) ON DELETE CASCADE,
         stage_id TEXT NOT NULL,
+        run_kind TEXT NOT NULL DEFAULT 'initial'
+          CHECK (run_kind IN ('initial', 'regeneration', 'variation')),
         status TEXT NOT NULL
           CHECK (status IN ('running', 'succeeded', 'failed')),
         started_at TEXT NOT NULL,
@@ -128,6 +130,21 @@ export async function initializeStorage(
         PRIMARY KEY (project_id, stage_id)
       );
 
+      CREATE TABLE IF NOT EXISTS workflow_snapshots (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL
+          REFERENCES projects(id) ON DELETE CASCADE,
+        created_at TEXT NOT NULL,
+        replaced_from_stage TEXT NOT NULL
+          CHECK (replaced_from_stage IN ('design_brief', 'concept_screens', 'prd')),
+        design_brief_artifact_id TEXT NOT NULL
+          REFERENCES artifacts(id) ON DELETE RESTRICT,
+        concept_screen_artifact_id TEXT NOT NULL
+          REFERENCES artifacts(id) ON DELETE RESTRICT,
+        prd_artifact_id TEXT NOT NULL
+          REFERENCES artifacts(id) ON DELETE RESTRICT
+      );
+
       CREATE TABLE IF NOT EXISTS pending_cascades (
         project_id TEXT PRIMARY KEY
           REFERENCES projects(id) ON DELETE CASCADE,
@@ -140,6 +157,8 @@ export async function initializeStorage(
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL UNIQUE
           REFERENCES projects(id) ON DELETE CASCADE,
+        run_kind TEXT NOT NULL DEFAULT 'initial'
+          CHECK (run_kind IN ('initial', 'regeneration', 'variation')),
         status TEXT NOT NULL CHECK (
           status IN (
             'running', 'paused', 'failed', 'cancelled',
@@ -150,6 +169,8 @@ export async function initializeStorage(
           current_stage IN ('design_brief', 'concept_screens', 'prd', 'promotion')
         ),
         completed_operation_count INTEGER NOT NULL DEFAULT 0,
+        start_stage TEXT NOT NULL DEFAULT 'design_brief'
+          CHECK (start_stage IN ('design_brief', 'concept_screens', 'prd')),
         insight_source TEXT NOT NULL,
         configuration_json TEXT NOT NULL,
         design_brief_run_id TEXT REFERENCES stage_runs(id) ON DELETE SET NULL,
@@ -213,6 +234,24 @@ export async function initializeStorage(
     }
     if (!stageRunColumns.some(({ name }) => name === 'input_lineage_json')) {
       database.exec('ALTER TABLE stage_runs ADD COLUMN input_lineage_json TEXT;');
+    }
+    if (!stageRunColumns.some(({ name }) => name === 'run_kind')) {
+      database.exec(
+        "ALTER TABLE stage_runs ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'initial';",
+      );
+    }
+
+    const candidateColumns = database.prepare('PRAGMA table_info(workflow_candidates)')
+      .all() as unknown as Array<{ name: string }>;
+    if (!candidateColumns.some(({ name }) => name === 'start_stage')) {
+      database.exec(
+        "ALTER TABLE workflow_candidates ADD COLUMN start_stage TEXT NOT NULL DEFAULT 'design_brief';",
+      );
+    }
+    if (!candidateColumns.some(({ name }) => name === 'run_kind')) {
+      database.exec(
+        "ALTER TABLE workflow_candidates ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'initial';",
+      );
     }
 
     const insertDefault = database.prepare(`

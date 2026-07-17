@@ -276,6 +276,65 @@ describe('Workflow HTTP API', () => {
     });
   });
 
+  it('starts an explicitly chosen Variation Run through the public rerun command', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const app = await buildApp({ dataDirectory, mode: 'mock' });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Explicit PRD variation',
+        insightSource: 'Authors want deliberate variation without mixing workflow generations.',
+      },
+    });
+    const projectId = created.json().id as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations`,
+      headers: { host: 'localhost:4317' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/resume`,
+      headers: { host: 'localhost:4317' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/resume`,
+      headers: { host: 'localhost:4317' },
+    });
+    const original = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/promotion`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    const variation = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/workflow-reruns`,
+      headers: { host: 'localhost:4317' },
+      payload: { stageId: 'prd' },
+    });
+
+    expect(variation.statusCode).toBe(201);
+    expect(variation.json()).toMatchObject({
+      prd: { id: original.json().prd.id },
+      candidate: { runKind: 'variation', status: 'awaiting_promotion' },
+    });
+    const promoted = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/promotion`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(promoted.json()).toMatchObject({
+      lastPrdRun: { runKind: 'variation' },
+      snapshots: [{ replacedFromStage: 'prd' }],
+    });
+  });
+
   it('downloads the current deliverables as a named ZIP without an OpenAI check', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
     temporaryDirectories.push(dataDirectory);

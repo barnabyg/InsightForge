@@ -1674,6 +1674,38 @@ a {
   font-size: 12px;
 }
 
+.update-available {
+  margin: 0 0 18px;
+  padding: 16px 18px;
+  border: 1px solid #b9c5e8;
+  border-left: 3px solid var(--accent);
+  background: #f4f6fd;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.update-available strong {
+  display: block;
+  margin-bottom: 8px;
+}
+
+.update-available ul,
+.update-available p {
+  margin: 8px 0 0;
+}
+
+.update-available details {
+  margin-top: 12px;
+}
+
+.update-available code {
+  display: block;
+  margin-top: 6px;
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 10px;
+}
+
 .artifact-empty {
   min-height: 430px;
   padding: 58px;

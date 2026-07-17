@@ -76,6 +76,7 @@ export interface ConceptScreenRun {
   id: string;
   projectId: string;
   stageId: 'concept_screens';
+  runKind: RunKind;
   status: 'running' | 'succeeded' | 'failed' | 'cancelled';
   startedAt: string;
   completedAt: string | null;
@@ -121,6 +122,42 @@ export interface DesignBriefArtifact {
 }
 
 export type GeneratedStageId = 'design_brief' | 'concept_screens' | 'prd';
+export type RunKind = 'initial' | 'regeneration' | 'variation';
+
+export type WorkflowChangeKind = 'input' | 'prompt' | 'model' | 'settings';
+
+export interface WorkflowFingerprint {
+  input: string;
+  prompt: string;
+  model: string;
+  settings: string;
+  combined: string;
+}
+
+export interface WorkflowRerunPlan {
+  earliestChangedStage: GeneratedStageId;
+  affectedStages: GeneratedStageId[];
+  changes: Array<{
+    stageId: GeneratedStageId;
+    kind: WorkflowChangeKind;
+    message: string;
+  }>;
+  fingerprints: {
+    previous: WorkflowFingerprint;
+    current: WorkflowFingerprint;
+  };
+}
+
+export interface WorkflowSnapshotSummary {
+  id: string;
+  createdAt: string;
+  replacedFromStage: GeneratedStageId;
+  artifactIds: {
+    designBrief: string;
+    conceptScreens: string;
+    prd: string;
+  };
+}
 
 export interface FullGenerationProgressEvent {
   projectId: string;
@@ -148,6 +185,7 @@ export interface DesignBriefRun {
   id: string;
   projectId: string;
   stageId: 'design_brief';
+  runKind: RunKind;
   status: 'running' | 'succeeded' | 'failed';
   startedAt: string;
   completedAt: string | null;
@@ -174,6 +212,7 @@ export interface PrdRun {
   id: string;
   projectId: string;
   stageId: 'prd';
+  runKind: RunKind;
   status: 'running' | 'succeeded' | 'failed';
   startedAt: string;
   completedAt: string | null;
@@ -218,6 +257,7 @@ export interface CandidateWarning {
 export interface CandidateWorkflow {
   id: string;
   projectId: string;
+  runKind: RunKind;
   status: 'running' | 'paused' | 'failed' | 'cancelled'
     | 'awaiting_promotion' | 'awaiting_warning_review' | 'kept_after_warning_review';
   currentStage: GeneratedStageId | 'promotion';
@@ -231,6 +271,8 @@ export interface CandidateWorkflow {
 
 export interface ProjectWorkflow {
   projectId: string;
+  rerunPlan: WorkflowRerunPlan | null;
+  snapshots: WorkflowSnapshotSummary[];
   canGenerateFullWorkflow: boolean;
   fullGenerationBlocker: string | null;
   candidate: CandidateWorkflow | null;

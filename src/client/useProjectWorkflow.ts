@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type {
   ConceptScreenProgressEvent,
   FullGenerationProgressEvent,
+  GeneratedStageId,
   ProjectWorkflow,
 } from '../shared/generation.js';
 
@@ -30,6 +31,7 @@ export interface ProjectWorkflowController {
   generateConceptScreens(): Promise<ProjectWorkflow>;
   generatePrd(): Promise<ProjectWorkflow>;
   generateFullWorkflow(): Promise<ProjectWorkflow>;
+  regenerateWorkflow(startStage: GeneratedStageId): Promise<ProjectWorkflow>;
   resumeFullWorkflow(): Promise<ProjectWorkflow>;
   promoteFullWorkflow(): Promise<ProjectWorkflow>;
   keepCandidateAfterWarningReview(): Promise<ProjectWorkflow>;
@@ -199,6 +201,16 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
       return runFullGeneration(`/api/projects/${projectId}/full-generations`);
     },
 
+    async regenerateWorkflow(startStage) {
+      return runFullGeneration(
+        `/api/projects/${projectId}/workflow-reruns`,
+        {
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ stageId: startStage }),
+        },
+      );
+    },
+
     async resumeFullWorkflow() {
       return runFullGeneration(`/api/projects/${projectId}/full-generations/resume`);
     },
@@ -252,7 +264,10 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
     },
   };
 
-  async function runFullGeneration(url: string): Promise<ProjectWorkflow> {
+  async function runFullGeneration(
+    url: string,
+    init: Omit<RequestInit, 'method'> = {},
+  ): Promise<ProjectWorkflow> {
     setGeneratingStage('full_generation');
     setCancelling(false);
     setFullGenerationProgress(null);
@@ -271,7 +286,7 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
           resolve();
         };
       });
-      let next = await requestWorkflow(url, { method: 'POST' });
+      let next = await requestWorkflow(url, { ...init, method: 'POST' });
       while (next.candidate?.status === 'paused') {
         next = await requestWorkflow(
           `/api/projects/${projectId}/full-generations/resume`,

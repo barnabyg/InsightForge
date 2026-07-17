@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CandidateWorkflow } from '../shared/generation.js';
+import type { CandidateWorkflow, GeneratedStageId } from '../shared/generation.js';
 import type { Project } from '../shared/projects.js';
 import { MarkdownArtifact } from './MarkdownArtifact.js';
 import { ConceptScreenGallery } from './ConceptScreenGallery.js';
@@ -12,6 +12,7 @@ import styles from './App.module.css';
 interface ProjectWorkspaceProps {
   project: Project;
   onShowLibrary(): void;
+  onEditPrompts(): void;
   onSaveInsight(insightSource: string): Promise<Project>;
 }
 
@@ -24,6 +25,18 @@ interface PendingImport {
 }
 
 type CandidatePrimaryAction = 'cancel' | 'promote' | 'resume';
+
+const generatedStageNames: Record<GeneratedStageId, string> = {
+  design_brief: 'Design Brief',
+  concept_screens: 'Concept Screens',
+  prd: 'PRD',
+};
+
+const generatedStageOrder: GeneratedStageId[] = [
+  'design_brief',
+  'concept_screens',
+  'prd',
+];
 
 const candidatePresentationByStatus = {
   running: {
@@ -94,6 +107,7 @@ const candidatePresentationByStatus = {
 export function ProjectWorkspace({
   project,
   onShowLibrary,
+  onEditPrompts,
   onSaveInsight,
 }: ProjectWorkspaceProps) {
   const [selectedStage, setSelectedStage] = useState<SelectedStage>('insight_source');
@@ -101,6 +115,7 @@ export function ProjectWorkspace({
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [confirmCascade, setConfirmCascade] = useState(false);
+  const [confirmRerun, setConfirmRerun] = useState<GeneratedStageId | null>(null);
   const [confirmFullGeneration, setConfirmFullGeneration] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
@@ -224,8 +239,18 @@ export function ProjectWorkspace({
     saving: { label: 'Saving Insight Source', visible: 'Saving…' },
     error: { label: 'Insight Source save failed', visible: 'Save failed' },
   }[saveState];
+  const rerunPlan = workflow.workflow?.rerunPlan ?? null;
+  const completeWorkflow = Boolean(
+    workflow.workflow?.designBrief
+    && workflow.workflow.conceptScreenSet
+    && workflow.workflow.prd,
+  );
+  const affectedStage = (stageId: GeneratedStageId) =>
+    rerunPlan?.affectedStages.includes(stageId) ?? false;
   const designBriefState = workflow.generating
     ? 'Generating'
+    : rerunPlan?.earliestChangedStage === 'design_brief'
+      ? 'Update Available'
     : workflow.workflow?.designBrief
       ? 'Current'
       : insight.trim()
@@ -233,6 +258,10 @@ export function ProjectWorkspace({
         : 'Waiting';
   const conceptScreenState = workflow.generatingStage === 'concept_screens'
     ? 'Generating'
+    : rerunPlan?.earliestChangedStage === 'concept_screens'
+      ? 'Update Available'
+    : affectedStage('concept_screens')
+      ? 'Affected'
     : workflow.workflow?.conceptScreenSet
       ? 'Current'
       : workflow.workflow?.designBrief
@@ -240,6 +269,10 @@ export function ProjectWorkspace({
         : 'Waiting';
   const prdState = workflow.generatingStage === 'prd'
     ? 'Generating'
+    : rerunPlan?.earliestChangedStage === 'prd'
+      ? 'Update Available'
+    : affectedStage('prd')
+      ? 'Affected'
     : workflow.workflow?.prd
       ? 'Current'
       : workflow.workflow?.conceptScreenSet
@@ -279,6 +312,62 @@ export function ProjectWorkspace({
         cancelled: 'Candidate Workflow cancelled',
       }[fullProgress.phase]
     : fullStageName;
+
+  function rerunStartFor(stageId: GeneratedStageId): GeneratedStageId {
+    if (!rerunPlan) return stageId;
+    return generatedStageOrder.indexOf(stageId)
+      >= generatedStageOrder.indexOf(rerunPlan.earliestChangedStage)
+      ? rerunPlan.earliestChangedStage
+      : stageId;
+  }
+
+  function completeWorkflowActionLabel(stageId: GeneratedStageId): string {
+    if (!rerunPlan) return 'Generate another variation';
+    const startStage = rerunStartFor(stageId);
+    return startStage === stageId
+      ? 'Regenerate from here'
+      : `Regenerate from ${generatedStageNames[startStage]}`;
+  }
+
+  function updateAvailableNotice(stageId: GeneratedStageId) {
+    if (rerunPlan?.earliestChangedStage !== stageId) return null;
+    return (
+      <section
+        className={styles['update-available']}
+        role="status"
+        aria-label="Update available"
+      >
+        <div>
+          <p className={styles.eyebrow}>Update Available</p>
+          <strong>{generatedStageNames[stageId]} inputs or configuration changed</strong>
+        </div>
+        <ul>
+          {rerunPlan.changes.filter((change) => change.stageId === stageId).map((change) => (
+            <li key={`${change.stageId}-${change.kind}`}>{change.message}</li>
+          ))}
+        </ul>
+        <p>
+          Regeneration replaces {rerunPlan.affectedStages
+            .map((affected) => generatedStageNames[affected]).join(', ')} together.
+        </p>
+        <details>
+          <summary>Inspect fingerprints</summary>
+          <code>Current {rerunPlan.fingerprints.previous.combined}</code>
+          <code>Next {rerunPlan.fingerprints.current.combined}</code>
+        </details>
+      </section>
+    );
+  }
+
+  const confirmedRerunStages = confirmRerun
+    ? generatedStageOrder.slice(generatedStageOrder.indexOf(confirmRerun))
+    : [];
+  const confirmedOperationCount = confirmRerun === 'design_brief'
+    ? 5
+    : confirmRerun === 'concept_screens'
+      ? 4
+      : 1;
+  const confirmedRunIsVariation = rerunPlan === null;
 
   return (
     <div className={styles['project-workspace']}>
@@ -437,7 +526,7 @@ export function ProjectWorkspace({
               <div className={styles['candidate-summary']} role="status">
                 <div>
                   <strong>
-                    {candidatePresentation?.heading}
+                    {candidate.runKind === 'variation' ? 'Variation Run' : candidatePresentation?.heading}
                   </strong>
                   <span>{candidate.completedOperationCount} of 5 operations complete · {candidatePresentation?.locationPrefix} {fullStageName}</span>
                   {candidate.error && <p>{candidate.error.message}</p>}
@@ -514,13 +603,23 @@ export function ProjectWorkspace({
                   <strong>{workflow.workflow?.designBriefConfiguration.model ?? 'Loading model…'}</strong>
                   <span>Uses the active Design Brief prompt and protected Insight Source input.</span>
                 </div>
-                <a href="/?view=prompts">Edit shared prompt</a>
+                <a
+                  href="/?view=prompts"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onEditPrompts();
+                  }}
+                >Edit shared prompt</a>
                 <button
                   className={styles['primary-action']}
                   type="button"
-                  disabled={workflow.loading || workflow.generating || !workflow.workflow?.canGenerateDesignBrief}
+                  disabled={workflow.loading || workflow.generating || (
+                    !completeWorkflow && !workflow.workflow?.canGenerateDesignBrief
+                  )}
                   onClick={() => {
-                    if (workflow.workflow?.conceptScreenSet) {
+                    if (completeWorkflow) {
+                      setConfirmRerun(rerunStartFor('design_brief'));
+                    } else if (workflow.workflow?.conceptScreenSet) {
                       setConfirmCascade(true);
                     } else {
                       void workflow.generateDesignBrief().catch(() => undefined);
@@ -529,13 +628,17 @@ export function ProjectWorkspace({
                 >
                   {workflow.generating
                     ? 'Generating…'
-                    : workflow.workflow?.designBrief
+                    : completeWorkflow
+                      ? completeWorkflowActionLabel('design_brief')
+                      : workflow.workflow?.designBrief
                       ? 'Generate another variation'
                       : 'Generate Design Brief'}
                 </button>
               </section>
 
-              {workflow.workflow?.generationBlocker && (
+              {updateAvailableNotice('design_brief')}
+
+              {!completeWorkflow && workflow.workflow?.generationBlocker && (
                 <p className={styles['generation-blocker']}>{workflow.workflow.generationBlocker}</p>
               )}
 
@@ -591,7 +694,13 @@ export function ProjectWorkspace({
                     {workflow.workflow?.conceptScreenConfiguration.imageQuality ?? '—'} quality · three sequential PNG operations using the protected Design Brief.
                   </span>
                 </div>
-                <a href="/?view=prompts">Edit shared prompt</a>
+                <a
+                  href="/?view=prompts"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onEditPrompts();
+                  }}
+                >Edit shared prompt</a>
                 {workflow.generatingStage === 'concept_screens' ? (
                   <button
                     className={styles['secondary-action']}
@@ -603,10 +712,20 @@ export function ProjectWorkspace({
                   <button
                     className={styles['primary-action']}
                     type="button"
-                    disabled={workflow.loading || workflow.generating || !workflow.workflow?.canGenerateConceptScreens}
-                    onClick={() => void workflow.generateConceptScreens().catch(() => undefined)}
+                    disabled={workflow.loading || workflow.generating || (
+                      !completeWorkflow && !workflow.workflow?.canGenerateConceptScreens
+                    )}
+                    onClick={() => {
+                      if (completeWorkflow) {
+                        setConfirmRerun(rerunStartFor('concept_screens'));
+                      } else {
+                        void workflow.generateConceptScreens().catch(() => undefined);
+                      }
+                    }}
                   >
-                    {workflow.workflow?.lastConceptScreenRun
+                    {completeWorkflow
+                      ? completeWorkflowActionLabel('concept_screens')
+                      : workflow.workflow?.lastConceptScreenRun
                       && workflow.workflow.lastConceptScreenRun.status !== 'succeeded'
                       && workflow.workflow.lastConceptScreenRun.completedOperationCount < 3
                       ? `Resume from Screen ${workflow.workflow.lastConceptScreenRun.completedOperationCount + 1}`
@@ -617,7 +736,9 @@ export function ProjectWorkspace({
                 )}
               </section>
 
-              {workflow.workflow?.conceptScreenGenerationBlocker && (
+              {updateAvailableNotice('concept_screens')}
+
+              {!completeWorkflow && workflow.workflow?.conceptScreenGenerationBlocker && (
                 <p className={styles['generation-blocker']}>{workflow.workflow.conceptScreenGenerationBlocker}</p>
               )}
 
@@ -674,20 +795,38 @@ export function ProjectWorkspace({
                   <strong>{workflow.workflow?.prdConfiguration.model ?? 'Loading model…'}</strong>
                   <span>Uses the protected Design Brief and all three current Concept Screens. The Insight Source is not attached separately.</span>
                 </div>
-                <a href="/?view=prompts">Edit shared prompt</a>
+                <a
+                  href="/?view=prompts"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    onEditPrompts();
+                  }}
+                >Edit shared prompt</a>
                 <button
                   className={styles['primary-action']}
                   type="button"
-                  disabled={workflow.loading || workflow.generating || !workflow.workflow?.canGeneratePrd}
-                  onClick={() => void workflow.generatePrd().catch(() => undefined)}
+                  disabled={workflow.loading || workflow.generating || (
+                    !completeWorkflow && !workflow.workflow?.canGeneratePrd
+                  )}
+                  onClick={() => {
+                    if (completeWorkflow) {
+                      setConfirmRerun(rerunStartFor('prd'));
+                    } else {
+                      void workflow.generatePrd().catch(() => undefined);
+                    }
+                  }}
                 >
                   {workflow.generatingStage === 'prd'
                     ? 'Generating…'
-                    : workflow.workflow?.prd
+                    : completeWorkflow
+                      ? completeWorkflowActionLabel('prd')
+                      : workflow.workflow?.prd
                       ? 'Generate another variation'
                       : 'Generate PRD'}
                 </button>
               </section>
+
+              {updateAvailableNotice('prd')}
 
               {workflow.workflow?.prdGenerationBlocker && (
                 <p className={styles['generation-blocker']}>{workflow.workflow.prdGenerationBlocker}</p>
@@ -744,6 +883,56 @@ export function ProjectWorkspace({
         >
           <p>This cascade will generate a new Design Brief and then three new Concept Screens.</p>
           <p>The current Design Brief and Concept Screen Set remain available unless the complete cascade succeeds.</p>
+        </Modal>
+      )}
+
+      {confirmRerun && (
+        <Modal
+          title={confirmedRunIsVariation
+            ? `Generate another ${generatedStageNames[confirmRerun]} variation?`
+            : `Regenerate from ${generatedStageNames[confirmRerun]}?`}
+          onDismiss={() => setConfirmRerun(null)}
+          actions={<>
+            <button className={styles['secondary-action']} type="button" onClick={() => setConfirmRerun(null)}>Cancel</button>
+            <button className={styles['primary-action']} type="button" onClick={() => {
+              const startStage = confirmRerun;
+              setConfirmRerun(null);
+              void workflow.regenerateWorkflow(startStage).catch(() => undefined);
+            }}>{confirmedRunIsVariation ? 'Generate Variation Run' : 'Start regeneration'}</button>
+          </>}
+        >
+          {confirmedRunIsVariation ? (
+            <p>The Stage Input, prompt, model, and settings are identical to the current run. This will be recorded as a <strong>Variation Run</strong>.</p>
+          ) : (
+            <>
+              <p>Changes detected:</p>
+              <ul>
+                {rerunPlan?.changes.filter((change) => (
+                  confirmedRerunStages.includes(change.stageId)
+                )).map((change) => (
+                  <li key={`${change.stageId}-${change.kind}`}>
+                    {generatedStageNames[change.stageId]} · {change.message}
+                  </li>
+                ))}
+              </ul>
+            </>
+          )}
+          <p>This Candidate Workflow will replace:</p>
+          <ul>
+            {confirmedRerunStages.map((stageId) => (
+              <li key={stageId}>
+                {generatedStageNames[stageId]} · {
+                  stageId === 'design_brief'
+                    ? workflow.workflow?.designBriefConfiguration.model
+                    : stageId === 'concept_screens'
+                      ? `${workflow.workflow?.conceptScreenConfiguration.model} · ${workflow.workflow?.conceptScreenConfiguration.imageQuality} quality`
+                      : workflow.workflow?.prdConfiguration.model
+                }
+              </li>
+            ))}
+          </ul>
+          <p>{confirmedOperationCount} OpenAI {confirmedOperationCount === 1 ? 'operation' : 'operations'} will run with no automatic retry.</p>
+          <p>The current coherent workflow remains visible during generation and will be preserved automatically as a Workflow Snapshot immediately before promotion.</p>
         </Modal>
       )}
 

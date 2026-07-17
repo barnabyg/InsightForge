@@ -1121,6 +1121,314 @@ describe('Workflow service', () => {
     );
   });
 
+  it('regenerates a changed stage suffix atomically and snapshots the workflow it replaces', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'A changed reusable prompt must refresh one coherent product workflow.',
+    });
+    let briefVersion = 0;
+    let screenVersion = 0;
+    let prdVersion = 0;
+    const calls: string[] = [];
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          briefVersion += 1;
+          calls.push(`design_brief_${briefVersion}`);
+          return {
+            markdown: `# Design Brief ${briefVersion}\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: `resp_brief_${briefVersion}`,
+            requestId: `req_brief_${briefVersion}`,
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          prdVersion += 1;
+          calls.push(`prd_${prdVersion}`);
+          return {
+            markdown: `# PRD ${prdVersion}\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: `resp_prd_${prdVersion}`,
+            requestId: `req_prd_${prdVersion}`,
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          if (input.ordinal === 1) screenVersion += 1;
+          calls.push(`concept_screen_${screenVersion}_${input.ordinal}`);
+          return {
+            png: pngFixture(screenVersion * 30 + input.ordinal),
+            requestId: `req_screen_${screenVersion}_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await completeFullWorkflow(workflows, project.id);
+    const original = workflows.promoteFullWorkflow(project.id);
+    const originalArtifactIds = {
+      designBrief: original.designBrief!.id,
+      conceptScreens: original.conceptScreenSet!.id,
+      prd: original.prd!.id,
+    };
+
+    const configuration = await openWorkflowConfigurationService(dataDirectory, {
+      now: () => new Date('2026-07-17T12:00:00.000Z'),
+    });
+    const currentConfiguration = configuration.getWorkflowConfiguration()
+      .stages.find(({ id }) => id === 'design_brief')!;
+    configuration.commitStageConfiguration('design_brief', {
+      prompt: `${currentConfiguration.prompt}\nPrioritize explicit trade-offs.`,
+      model: 'gpt-5.4-mini',
+      imageQuality: null,
+    });
+    configuration.close();
+
+    const update = workflows.getProjectWorkflow(project.id);
+    expect(update.rerunPlan).toMatchObject({
+      earliestChangedStage: 'design_brief',
+      affectedStages: ['design_brief', 'concept_screens', 'prd'],
+      changes: [
+        { stageId: 'design_brief', kind: 'prompt' },
+        { stageId: 'design_brief', kind: 'model' },
+      ],
+    });
+    expect(update.rerunPlan?.fingerprints.previous.combined).not.toBe(
+      update.rerunPlan?.fingerprints.current.combined,
+    );
+    expect(update.rerunPlan?.fingerprints.previous.input).toBe(
+      update.rerunPlan?.fingerprints.current.input,
+    );
+    expect(update.rerunPlan?.fingerprints.previous.prompt).not.toBe(
+      update.rerunPlan?.fingerprints.current.prompt,
+    );
+    expect(update.rerunPlan?.fingerprints.previous.model).not.toBe(
+      update.rerunPlan?.fingerprints.current.model,
+    );
+    await expect(workflows.regenerateWorkflow(project.id, 'prd')).rejects.toThrow(
+      'Regenerate from Design Brief to include every changed stage.',
+    );
+
+    const afterBrief = await workflows.regenerateWorkflow(project.id, 'design_brief');
+    expect(afterBrief).toMatchObject({
+      designBrief: { id: originalArtifactIds.designBrief },
+      conceptScreenSet: { id: originalArtifactIds.conceptScreens },
+      prd: { id: originalArtifactIds.prd },
+      candidate: { status: 'paused', currentStage: 'concept_screens' },
+    });
+    let candidate = afterBrief;
+    while (candidate.candidate?.status === 'paused') {
+      candidate = await workflows.resumeFullWorkflow(project.id);
+    }
+    const regenerated = workflows.promoteFullWorkflow(project.id);
+
+    expect(calls).toEqual([
+      'design_brief_1',
+      'concept_screen_1_1',
+      'concept_screen_1_2',
+      'concept_screen_1_3',
+      'prd_1',
+      'design_brief_2',
+      'concept_screen_2_1',
+      'concept_screen_2_2',
+      'concept_screen_2_3',
+      'prd_2',
+    ]);
+    expect(regenerated.designBrief?.id).not.toBe(originalArtifactIds.designBrief);
+    expect(regenerated.conceptScreenSet?.id).not.toBe(originalArtifactIds.conceptScreens);
+    expect(regenerated.prd?.id).not.toBe(originalArtifactIds.prd);
+    expect(regenerated.snapshots).toEqual([
+      expect.objectContaining({
+        replacedFromStage: 'design_brief',
+        artifactIds: originalArtifactIds,
+      }),
+    ]);
+    expect(regenerated.rerunPlan).toBeNull();
+  });
+
+  it('regenerates from Concept Screens when its prompt or image settings change', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'Image configuration changes should preserve the authoritative Design Brief.',
+    });
+    const calls: string[] = [];
+    let cycle = 1;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          calls.push('design_brief');
+          return {
+            markdown: `# Design Brief\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: 'resp_brief',
+            requestId: 'req_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          calls.push(`prd_${cycle}`);
+          return {
+            markdown: `# PRD ${cycle}\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: `resp_prd_${cycle}`,
+            requestId: `req_prd_${cycle}`,
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          calls.push(`concept_screen_${cycle}_${input.ordinal}`);
+          return {
+            png: pngFixture(cycle * 30 + input.ordinal),
+            requestId: `req_screen_${cycle}_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await completeFullWorkflow(workflows, project.id);
+    const original = workflows.promoteFullWorkflow(project.id);
+
+    const configuration = await openWorkflowConfigurationService(dataDirectory, {
+      now: () => new Date('2026-07-17T12:10:00.000Z'),
+    });
+    const currentConfiguration = configuration.getWorkflowConfiguration()
+      .stages.find(({ id }) => id === 'concept_screens')!;
+    configuration.commitStageConfiguration('concept_screens', {
+      prompt: `${currentConfiguration.prompt}\nEmphasize the shared navigation.`,
+      model: currentConfiguration.model,
+      imageQuality: currentConfiguration.imageQuality === 'high' ? 'medium' : 'high',
+    });
+    configuration.close();
+
+    const update = workflows.getProjectWorkflow(project.id);
+    expect(update.rerunPlan).toMatchObject({
+      earliestChangedStage: 'concept_screens',
+      affectedStages: ['concept_screens', 'prd'],
+      changes: [
+        { stageId: 'concept_screens', kind: 'prompt' },
+        { stageId: 'concept_screens', kind: 'settings' },
+      ],
+    });
+
+    cycle = 2;
+    let candidate = await workflows.regenerateWorkflow(project.id, 'concept_screens');
+    while (candidate.candidate?.status === 'paused') {
+      candidate = await workflows.resumeFullWorkflow(project.id);
+    }
+    const regenerated = workflows.promoteFullWorkflow(project.id);
+
+    expect(calls).toEqual([
+      'design_brief',
+      'concept_screen_1_1',
+      'concept_screen_1_2',
+      'concept_screen_1_3',
+      'prd_1',
+      'concept_screen_2_1',
+      'concept_screen_2_2',
+      'concept_screen_2_3',
+      'prd_2',
+    ]);
+    expect(regenerated.designBrief?.id).toBe(original.designBrief?.id);
+    expect(regenerated.conceptScreenSet?.id).not.toBe(original.conceptScreenSet?.id);
+    expect(regenerated.prd?.id).not.toBe(original.prd?.id);
+    expect(regenerated.snapshots[0]).toMatchObject({
+      replacedFromStage: 'concept_screens',
+      artifactIds: {
+        designBrief: original.designBrief?.id,
+        conceptScreens: original.conceptScreenSet?.id,
+        prd: original.prd?.id,
+      },
+    });
+  });
+
+  it('labels an explicitly chosen identical-input suffix as a Variation Run', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'An Author should be able to sample another PRD without pretending inputs changed.',
+    });
+    const calls: string[] = [];
+    let prdVersion = 0;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          calls.push('design_brief');
+          return {
+            markdown: `# Design Brief\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: 'resp_brief',
+            requestId: 'req_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          prdVersion += 1;
+          calls.push(`prd_${prdVersion}`);
+          return {
+            markdown: `# PRD variation ${prdVersion}\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: `resp_prd_${prdVersion}`,
+            requestId: `req_prd_${prdVersion}`,
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          calls.push(`concept_screen_${input.ordinal}`);
+          return {
+            png: pngFixture(40 + input.ordinal),
+            requestId: `req_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await completeFullWorkflow(workflows, project.id);
+    const original = workflows.promoteFullWorkflow(project.id);
+    expect(original.rerunPlan).toBeNull();
+
+    const candidate = await workflows.regenerateWorkflow(project.id, 'prd');
+    expect(candidate).toMatchObject({
+      designBrief: { id: original.designBrief?.id },
+      conceptScreenSet: { id: original.conceptScreenSet?.id },
+      prd: { id: original.prd?.id },
+      candidate: {
+        runKind: 'variation',
+        status: 'awaiting_promotion',
+        completedOperationCount: 5,
+      },
+    });
+    const varied = workflows.promoteFullWorkflow(project.id);
+
+    expect(calls).toEqual([
+      'design_brief',
+      'concept_screen_1',
+      'concept_screen_2',
+      'concept_screen_3',
+      'prd_1',
+      'prd_2',
+    ]);
+    expect(varied.designBrief?.id).toBe(original.designBrief?.id);
+    expect(varied.conceptScreenSet?.id).toBe(original.conceptScreenSet?.id);
+    expect(varied.prd?.id).not.toBe(original.prd?.id);
+    expect(varied.lastPrdRun?.runKind).toBe('variation');
+    expect(varied.snapshots[0]?.replacedFromStage).toBe('prd');
+  });
+
   it('resumes a failed Candidate Workflow at the failed operation without automatic retry', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);

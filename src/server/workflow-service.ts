@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -20,12 +20,18 @@ import type {
   DesignBriefGenerationResult,
   DesignBriefRun,
   FullGenerationProgressEvent,
+  GeneratedStageId,
   PrdArtifact,
   PrdGenerationResult,
   PrdRun,
   ProjectWorkflow,
+  RunKind,
   TextGenerationBoundary,
   TokenUsage,
+  WorkflowChangeKind,
+  WorkflowFingerprint,
+  WorkflowRerunPlan,
+  WorkflowSnapshotSummary,
 } from '../shared/generation.js';
 import type { ImageQuality, StageId } from '../shared/workflow-configuration.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
@@ -65,6 +71,7 @@ interface ArtifactRow {
 interface RunRow {
   id: string;
   project_id: string;
+  run_kind: RunKind;
   status: DesignBriefRun['status'];
   started_at: string;
   completed_at: string | null;
@@ -116,6 +123,7 @@ interface ConceptOperationRow {
 interface CandidateRow {
   id: string;
   project_id: string;
+  run_kind: RunKind;
   status: CandidateWorkflow['status'];
   current_stage: CandidateWorkflow['currentStage'];
   completed_operation_count: number;
@@ -132,6 +140,16 @@ interface CandidateRow {
   error_message: string | null;
   started_at: string;
   updated_at: string;
+  start_stage: GeneratedStageId;
+}
+
+interface WorkflowSnapshotRow {
+  id: string;
+  created_at: string;
+  replaced_from_stage: GeneratedStageId;
+  design_brief_artifact_id: string;
+  concept_screen_artifact_id: string;
+  prd_artifact_id: string;
 }
 
 interface CandidateConfigurations {
@@ -148,6 +166,10 @@ export interface WorkflowService {
   generateConceptScreens(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generatePrd(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generateFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
+  regenerateWorkflow(
+    projectId: string,
+    startStage: GeneratedStageId,
+  ): Promise<ProjectWorkflow>;
   resumeFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
   promoteFullWorkflow(projectId: string): ProjectWorkflow;
   keepCandidateAfterWarningReview(projectId: string): ProjectWorkflow;
@@ -236,11 +258,53 @@ function readJson<T>(value: string | null): T | null {
   return value === null ? null : JSON.parse(value) as T;
 }
 
+const generatedStages: GeneratedStageId[] = [
+  'design_brief',
+  'concept_screens',
+  'prd',
+];
+
+const generatedStageNames: Record<GeneratedStageId, string> = {
+  design_brief: 'Design Brief',
+  concept_screens: 'Concept Screens',
+  prd: 'PRD',
+};
+
+const workflowChangeMessages: Record<WorkflowChangeKind, string> = {
+  input: 'The Stage Input changed since the current Artifact was generated.',
+  prompt: 'The shared Stage Prompt changed since the current Artifact was generated.',
+  model: 'The selected model changed since the current Artifact was generated.',
+  settings: 'The generation settings changed since the current Artifact was generated.',
+};
+
+function sha256(value: string): string {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+function workflowFingerprint(parts: {
+  input: string;
+  prompt: string;
+  model: string;
+  settings: string;
+}): WorkflowFingerprint {
+  const fingerprint = {
+    input: sha256(parts.input),
+    prompt: sha256(parts.prompt),
+    model: sha256(parts.model),
+    settings: sha256(parts.settings),
+  };
+  return {
+    ...fingerprint,
+    combined: sha256(JSON.stringify(fingerprint)),
+  };
+}
+
 function candidateFromRow(row: CandidateRow | undefined): CandidateWorkflow | null {
   if (!row) return null;
   return {
     id: row.id,
     projectId: row.project_id,
+    runKind: row.run_kind,
     status: row.status,
     currentStage: row.current_stage,
     completedOperationCount: row.completed_operation_count,
@@ -273,6 +337,7 @@ function runFromRow(row: RunRow | undefined): DesignBriefRun | null {
     id: row.id,
     projectId: row.project_id,
     stageId: 'design_brief',
+    runKind: row.run_kind,
     status: row.status,
     startedAt: row.started_at,
     completedAt: row.completed_at,
@@ -316,6 +381,7 @@ function prdRunFromRow(row: RunRow | undefined): PrdRun | null {
     id: row.id,
     projectId: row.project_id,
     stageId: 'prd',
+    runKind: row.run_kind,
     status: row.status,
     startedAt: row.started_at,
     completedAt: row.completed_at,
@@ -422,6 +488,7 @@ function conceptRunFromRows(
     id: row.id,
     projectId: row.project_id,
     stageId: 'concept_screens',
+    runKind: row.run_kind,
     status: derivedStatus,
     startedAt: row.started_at,
     completedAt: row.completed_at,
@@ -742,6 +809,124 @@ export async function openWorkflowService(
     ).get(runId) as unknown as RunRow | undefined;
   }
 
+  function stageFingerprints(
+    projectId: string,
+    stageId: GeneratedStageId,
+  ): { previous: WorkflowFingerprint; current: WorkflowFingerprint } | null {
+    const project = requireProject(projectId);
+    const artifact = currentArtifact(projectId, stageId);
+    if (!artifact) return null;
+    const run = stageRun(artifact.run_id);
+    if (!run) return null;
+
+    let currentInput: string;
+    let configuration: ConfigurationRow;
+    let currentSettings = 'null';
+    if (stageId === 'design_brief') {
+      currentInput = project.insight_source;
+      configuration = designBriefConfiguration();
+    } else if (stageId === 'concept_screens') {
+      const designBrief = currentArtifact(projectId, 'design_brief');
+      if (!designBrief) return null;
+      currentInput = designBrief.markdown;
+      configuration = conceptScreenConfiguration();
+      currentSettings = JSON.stringify({ imageQuality: configuration.image_quality });
+    } else {
+      const designBrief = currentArtifact(projectId, 'design_brief');
+      const conceptScreenSet = currentArtifact(projectId, 'concept_screens');
+      if (!designBrief || !conceptScreenSet) return null;
+      const screens = conceptOperations(conceptScreenSet.run_id)
+        .filter((operation) => operation.status === 'succeeded')
+        .map((operation) => ({
+          assetId: operation.asset_id!,
+          ordinal: operation.ordinal,
+          width: operation.width!,
+          height: operation.height!,
+        }));
+      currentInput = JSON.stringify({
+        designBrief: {
+          value: designBrief.markdown,
+          artifactId: designBrief.id,
+          runId: designBrief.run_id,
+        },
+        conceptScreenSet: {
+          artifactId: conceptScreenSet.id,
+          runId: conceptScreenSet.run_id,
+          screens,
+        },
+      });
+      configuration = prdConfiguration();
+    }
+    const previousInput = stageId === 'prd'
+      ? run.input_lineage_json ?? run.input_snapshot
+      : run.input_snapshot;
+    return {
+      previous: workflowFingerprint({
+        input: previousInput,
+        prompt: run.prompt_snapshot,
+        model: run.model_snapshot,
+        settings: run.settings_json ?? 'null',
+      }),
+      current: workflowFingerprint({
+        input: currentInput,
+        prompt: configuration.prompt,
+        model: configuration.model,
+        settings: currentSettings,
+      }),
+    };
+  }
+
+  function rerunPlan(projectId: string): WorkflowRerunPlan | null {
+    const changes: WorkflowRerunPlan['changes'] = [];
+    const fingerprints = new Map<GeneratedStageId, {
+      previous: WorkflowFingerprint;
+      current: WorkflowFingerprint;
+    }>();
+    for (const stageId of generatedStages) {
+      const stage = stageFingerprints(projectId, stageId);
+      if (!stage) continue;
+      fingerprints.set(stageId, stage);
+      for (const kind of ['input', 'prompt', 'model', 'settings'] as const) {
+        if (stage.previous[kind] !== stage.current[kind]) {
+          changes.push({
+            stageId,
+            kind,
+            message: workflowChangeMessages[kind],
+          });
+        }
+      }
+    }
+    const earliestChangedStage = generatedStages.find((stageId) =>
+      changes.some((change) => change.stageId === stageId));
+    if (!earliestChangedStage) return null;
+    return {
+      earliestChangedStage,
+      affectedStages: generatedStages.slice(generatedStages.indexOf(earliestChangedStage)),
+      changes,
+      fingerprints: fingerprints.get(earliestChangedStage)!,
+    };
+  }
+
+  function workflowSnapshots(projectId: string): WorkflowSnapshotSummary[] {
+    const rows = database.prepare(`
+      SELECT id, created_at, replaced_from_stage,
+             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+      FROM workflow_snapshots
+      WHERE project_id = ?
+      ORDER BY created_at DESC, rowid DESC
+    `).all(projectId) as unknown as WorkflowSnapshotRow[];
+    return rows.map((row) => ({
+      id: row.id,
+      createdAt: row.created_at,
+      replacedFromStage: row.replaced_from_stage,
+      artifactIds: {
+        designBrief: row.design_brief_artifact_id,
+        conceptScreens: row.concept_screen_artifact_id,
+        prd: row.prd_artifact_id,
+      },
+    }));
+  }
+
   function emitCandidateProgress(
     candidate: CandidateRow,
     phase: FullGenerationProgressEvent['phase'],
@@ -802,9 +987,28 @@ export async function openWorkflowService(
         'The Insight Source changed while Full Generation was running.',
       );
     }
+    const currentDesignBrief = currentArtifact(candidate.project_id, 'design_brief');
+    const currentConceptScreens = currentArtifact(candidate.project_id, 'concept_screens');
+    const currentPrd = currentArtifact(candidate.project_id, 'prd');
     emitCandidateProgress(candidate, 'promoting', 'promotion', null, 5);
     database.exec('BEGIN IMMEDIATE;');
     try {
+      if (currentDesignBrief && currentConceptScreens && currentPrd) {
+        database.prepare(`
+          INSERT INTO workflow_snapshots (
+            id, project_id, created_at, replaced_from_stage,
+            design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        `).run(
+          randomUUID(),
+          candidate.project_id,
+          now().toISOString(),
+          candidate.start_stage,
+          currentDesignBrief.id,
+          currentConceptScreens.id,
+          currentPrd.id,
+        );
+      }
       const setCurrent = database.prepare(`
         INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
         VALUES (?, ?, ?)
@@ -914,6 +1118,8 @@ export async function openWorkflowService(
     const candidate = candidateRow(projectId);
     return {
       projectId,
+      rerunPlan: rerunPlan(projectId),
+      snapshots: workflowSnapshots(projectId),
       canGenerateFullWorkflow: hasInsight && !candidate && !hasWorkflow,
       fullGenerationBlocker: !hasInsight
         ? 'Add an Insight Source before starting Full Generation.'
@@ -1067,6 +1273,8 @@ export async function openWorkflowService(
       const configuration = candidate
         ? candidateConfigurations(candidate).designBrief
         : designBriefConfiguration();
+      const runKind: RunKind = candidate?.run_kind
+        ?? (currentArtifact(projectId, 'design_brief') ? 'variation' : 'initial');
       const requiresDownstreamCascade = Boolean(candidate) || Boolean(database.prepare(`
         SELECT 1
         FROM current_artifacts
@@ -1083,13 +1291,14 @@ export async function openWorkflowService(
       ].join('\n');
       database.prepare(`
         INSERT INTO stage_runs (
-          id, project_id, stage_id, status, started_at,
+          id, project_id, stage_id, run_kind, status, started_at,
           prompt_snapshot, model_snapshot, stage_configuration_updated_at,
           input_snapshot, assembled_request
-        ) VALUES (?, ?, 'design_brief', 'running', ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, 'design_brief', ?, 'running', ?, ?, ?, ?, ?, ?)
       `).run(
         runId,
         projectId,
+        runKind,
         startedAt.toISOString(),
         configuration.prompt,
         configuration.model,
@@ -1417,6 +1626,8 @@ export async function openWorkflowService(
       const configuration = candidate
         ? candidateConfigurations(candidate).conceptScreens
         : conceptScreenConfiguration();
+      const runKind: RunKind = candidate?.run_kind
+        ?? (currentArtifact(projectId, 'concept_screens') ? 'variation' : 'initial');
       const assembledRequest = [
         'Stage Prompt:',
         configuration.prompt,
@@ -1465,11 +1676,12 @@ export async function openWorkflowService(
         };
         database.prepare(`
           UPDATE stage_runs
-          SET status = 'running', completed_at = NULL, duration_ms = ?,
+          SET run_kind = ?, status = 'running', completed_at = NULL, duration_ms = ?,
               validation_json = NULL, error_code = NULL, error_message = NULL,
               attempt_history_json = ?
           WHERE id = ?
         `).run(
+          runKind,
           priorDurationMs,
           JSON.stringify([...priorHistory, archivedAttempt]),
           runId,
@@ -1477,14 +1689,15 @@ export async function openWorkflowService(
       } else {
         database.prepare(`
           INSERT INTO stage_runs (
-            id, project_id, stage_id, status, started_at,
+            id, project_id, stage_id, run_kind, status, started_at,
             prompt_snapshot, model_snapshot, stage_configuration_updated_at,
             input_snapshot, input_artifact_id, input_run_id,
             assembled_request, settings_json
-          ) VALUES (?, ?, 'concept_screens', 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, 'concept_screens', ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           runId,
           projectId,
+          runKind,
           runStartedAt.toISOString(),
           configuration.prompt,
           configuration.model,
@@ -1889,6 +2102,8 @@ export async function openWorkflowService(
       const configuration = candidate
         ? candidateConfigurations(candidate).prd
         : prdConfiguration();
+      const runKind: RunKind = candidate?.run_kind
+        ?? (currentArtifact(projectId, 'prd') ? 'variation' : 'initial');
       const stageInput: PrdRun['stageInput'] = {
         designBrief: {
           value: designBrief.markdown,
@@ -1921,14 +2136,15 @@ export async function openWorkflowService(
       const startedAt = now();
       database.prepare(`
         INSERT INTO stage_runs (
-          id, project_id, stage_id, status, started_at,
+          id, project_id, stage_id, run_kind, status, started_at,
           prompt_snapshot, model_snapshot, stage_configuration_updated_at,
           input_snapshot, input_artifact_id, input_run_id,
           input_lineage_json, assembled_request
-        ) VALUES (?, ?, 'prd', 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, 'prd', ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `).run(
         runId,
         projectId,
+        runKind,
         startedAt.toISOString(),
         configuration.prompt,
         configuration.model,
@@ -2131,13 +2347,92 @@ export async function openWorkflowService(
       database.prepare(`
         INSERT INTO workflow_candidates (
           id, project_id, status, current_stage, completed_operation_count,
-          insight_source, configuration_json, started_at, updated_at
-        ) VALUES (?, ?, 'running', 'design_brief', 0, ?, ?, ?, ?)
+          start_stage, insight_source, configuration_json, started_at, updated_at
+        ) VALUES (?, ?, 'running', 'design_brief', 0, 'design_brief', ?, ?, ?, ?)
       `).run(
         candidateId,
         projectId,
         project.insight_source,
         JSON.stringify(configurations),
+        startedAt,
+        startedAt,
+      );
+      return continueFullCandidate(requireCandidate(projectId, candidateId));
+    },
+
+    async regenerateWorkflow(projectId, startStage) {
+      const project = requireProject(projectId);
+      if (!generatedStages.includes(startStage)) {
+        throw new WorkflowValidationError('Choose a valid stage to regenerate.');
+      }
+      if (candidateRow(projectId)) {
+        throw new WorkflowValidationError(
+          'Resume or discard the existing Candidate Workflow first.',
+        );
+      }
+      if (
+        activeDesignBriefRuns.has(projectId)
+        || activeConceptRuns.has(projectId)
+        || activePrdRuns.has(projectId)
+        || activeFullRuns.has(projectId)
+      ) {
+        throw new WorkflowValidationError(
+          'Generation is already running for this Project.',
+        );
+      }
+      const currentDesignBrief = currentArtifact(projectId, 'design_brief');
+      const currentConceptScreens = currentArtifact(projectId, 'concept_screens');
+      const currentPrd = currentArtifact(projectId, 'prd');
+      if (!currentDesignBrief || !currentConceptScreens || !currentPrd) {
+        throw new WorkflowValidationError(
+          'Generate the complete workflow before regenerating from a stage.',
+        );
+      }
+      const update = rerunPlan(projectId);
+      if (
+        update
+        && generatedStages.indexOf(startStage)
+          > generatedStages.indexOf(update.earliestChangedStage)
+      ) {
+        throw new WorkflowValidationError(
+          `Regenerate from ${generatedStageNames[update.earliestChangedStage]} to include every changed stage.`,
+        );
+      }
+      const candidateId = randomUUID();
+      const startedAt = now().toISOString();
+      const runKind: RunKind = update ? 'regeneration' : 'variation';
+      const configurations: CandidateConfigurations = {
+        designBrief: designBriefConfiguration(),
+        conceptScreens: conceptScreenConfiguration(),
+        prd: prdConfiguration(),
+      };
+      const startsAtIndex = generatedStages.indexOf(startStage);
+      const completedOperationCount = startStage === 'design_brief'
+        ? 0
+        : startStage === 'concept_screens'
+          ? 1
+          : 4;
+      database.prepare(`
+        INSERT INTO workflow_candidates (
+          id, project_id, run_kind, status, current_stage, completed_operation_count,
+          start_stage, insight_source, configuration_json,
+          design_brief_run_id, design_brief_artifact_id,
+          concept_screen_run_id, concept_screen_artifact_id,
+          started_at, updated_at
+        ) VALUES (?, ?, ?, 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        candidateId,
+        projectId,
+        runKind,
+        startStage,
+        completedOperationCount,
+        startStage,
+        project.insight_source,
+        JSON.stringify(configurations),
+        startsAtIndex > 0 ? currentDesignBrief.run_id : null,
+        startsAtIndex > 0 ? currentDesignBrief.id : null,
+        startsAtIndex > 1 ? currentConceptScreens.run_id : null,
+        startsAtIndex > 1 ? currentConceptScreens.id : null,
         startedAt,
         startedAt,
       );
