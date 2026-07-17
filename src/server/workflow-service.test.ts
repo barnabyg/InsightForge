@@ -1238,6 +1238,20 @@ describe('Workflow service', () => {
       },
     });
 
+    const kept = workflows.rejectFullWorkflowWarnings(project.id);
+    expect(kept).toMatchObject({
+      designBrief: null,
+      conceptScreenSet: null,
+      prd: null,
+      candidate: {
+        status: 'warnings_rejected',
+        warnings: [
+          { stageId: 'design_brief', code: 'below_recommended_word_count' },
+          { stageId: 'prd', code: 'below_recommended_word_count' },
+        ],
+      },
+    });
+
     const promoted = workflows.promoteFullWorkflow(project.id);
 
     expect(promoted).toMatchObject({

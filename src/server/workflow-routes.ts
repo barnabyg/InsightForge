@@ -189,6 +189,17 @@ export function registerWorkflowRoutes(
     },
   );
 
+  app.post<{ Params: ProjectParameters }>(
+    '/api/projects/:id/full-generations/warnings/rejection',
+    async (request, reply) => {
+      try {
+        return workflows.rejectFullWorkflowWarnings(request.params.id);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
   app.delete<{ Params: ProjectParameters }>(
     '/api/projects/:id/full-generations/active',
     async (request, reply) => {

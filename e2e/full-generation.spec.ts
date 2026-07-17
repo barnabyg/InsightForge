@@ -76,6 +76,12 @@ test('Author reviews sanity warnings before promoting a complete Candidate Workf
   await expect(warningReview).toContainText('1 sanity warning', { timeout: 15_000 });
   await expect(warningReview).toContainText('recommended minimum is 250');
   await expect(page.getByRole('button', { name: /PRD/ })).not.toContainText('Current');
+  await page.getByRole('button', { name: 'Keep Candidate Workflow' }).click();
+  const keptCandidate = page.getByRole('status').filter({
+    hasText: 'Candidate kept for later',
+  });
+  await expect(keptCandidate).toContainText('1 sanity warning');
+  await expect(page.getByRole('button', { name: /PRD/ })).not.toContainText('Current');
   await page.getByRole('button', { name: 'Promote Candidate Workflow' }).click();
 
   await expect(warningReview).toHaveCount(0);

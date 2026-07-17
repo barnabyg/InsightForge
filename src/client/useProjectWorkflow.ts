@@ -32,6 +32,7 @@ export interface ProjectWorkflowController {
   generateFullWorkflow(): Promise<ProjectWorkflow>;
   resumeFullWorkflow(): Promise<ProjectWorkflow>;
   promoteFullWorkflow(): Promise<ProjectWorkflow>;
+  rejectFullWorkflowWarnings(): Promise<ProjectWorkflow>;
   discardFullWorkflow(): Promise<ProjectWorkflow>;
   cancelFullWorkflow(): Promise<void>;
   cancelConceptScreens(): Promise<void>;
@@ -206,6 +207,16 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
       setError(null);
       const next = await requestWorkflow(
         `/api/projects/${projectId}/full-generations/promotion`,
+        { method: 'POST' },
+      );
+      setWorkflow(next);
+      return next;
+    },
+
+    async rejectFullWorkflowWarnings() {
+      setError(null);
+      const next = await requestWorkflow(
+        `/api/projects/${projectId}/full-generations/warnings/rejection`,
         { method: 'POST' },
       );
       setWorkflow(next);
