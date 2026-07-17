@@ -2082,6 +2082,11 @@ export async function openWorkflowService(
           'Concept Screen generation is already running for this Project.',
         );
       }
+      if (!candidate && hasCurrentPrd(projectId)) {
+        throw new WorkflowValidationError(
+          'Use a Candidate Workflow to replace the current PRD safely.',
+        );
+      }
       if (!candidate && pendingDesignBriefCandidate(projectId)) {
         throw new WorkflowValidationError(
           'Finish or resume the pending downstream cascade before generating a PRD.',

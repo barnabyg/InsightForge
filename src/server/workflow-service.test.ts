@@ -1415,6 +1415,9 @@ describe('Workflow service', () => {
     await completeFullWorkflow(workflows, project.id);
     const original = workflows.promoteFullWorkflow(project.id);
     expect(original.rerunPlan).toBeNull();
+    await expect(workflows.generatePrd(project.id)).rejects.toThrow(
+      'Use a Candidate Workflow to replace the current PRD safely.',
+    );
 
     const candidate = await workflows.regenerateWorkflow(project.id, 'prd');
     expect(candidate).toMatchObject({

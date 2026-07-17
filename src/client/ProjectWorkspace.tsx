@@ -496,8 +496,18 @@ export function ProjectWorkspace({
                   className={styles['primary-action']}
                   type="button"
                   disabled={!insight.trim() || saveState === 'saving'}
-                  onClick={() => setConfirmFullGeneration(true)}
-                >Generate complete workflow</button>
+                  onClick={() => {
+                    if (completeWorkflow) {
+                      setConfirmRerun(rerunStartFor('design_brief'));
+                    } else {
+                      setConfirmFullGeneration(true);
+                    }
+                  }}
+                >{completeWorkflow
+                    ? rerunPlan
+                      ? 'Regenerate complete workflow'
+                      : 'Generate another full variation'
+                    : 'Generate complete workflow'}</button>
               )}
             </div>
 
