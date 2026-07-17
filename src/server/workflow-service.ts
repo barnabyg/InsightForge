@@ -897,13 +897,15 @@ export async function openWorkflowService(
     const candidate = candidateRow(projectId);
     return {
       projectId,
-      canGenerateFullWorkflow: hasInsight && !candidate,
+      canGenerateFullWorkflow: hasInsight && !candidate && !hasPrd,
       fullGenerationBlocker: !hasInsight
         ? 'Add an Insight Source before starting Full Generation.'
         : candidate
           ? candidate.status === 'awaiting_warning_review'
             ? 'Review the Candidate Workflow warnings before promotion.'
             : 'Resume or discard the existing Candidate Workflow first.'
+          : hasPrd
+            ? 'Use safe regeneration to replace a complete current workflow.'
           : null,
       candidate: candidateFromRow(candidate),
       canGenerateDesignBrief: hasInsight && !hasPrd,
@@ -2065,6 +2067,11 @@ export async function openWorkflowService(
       if (!project.insight_source.trim()) {
         throw new WorkflowValidationError(
           'Add an Insight Source before starting Full Generation.',
+        );
+      }
+      if (hasCurrentPrd(projectId)) {
+        throw new WorkflowValidationError(
+          'Use safe regeneration to replace a complete current workflow.',
         );
       }
       if (candidateRow(projectId)) {

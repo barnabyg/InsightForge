@@ -1036,6 +1036,13 @@ describe('Workflow service', () => {
       prd: { markdown: longPrd.trim() },
       candidate: null,
     });
+    expect(generated).toMatchObject({
+      canGenerateFullWorkflow: false,
+      fullGenerationBlocker: 'Use safe regeneration to replace a complete current workflow.',
+    });
+    await expect(workflows.generateFullWorkflow(project.id)).rejects.toThrow(
+      'Use safe regeneration to replace a complete current workflow.',
+    );
   });
 
   it('resumes a failed Candidate Workflow at the failed operation without automatic retry', async () => {
