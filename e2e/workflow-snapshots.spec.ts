@@ -28,8 +28,16 @@ test('Author inspects, restores, and deletes Workflow Snapshots from compact his
   });
 
   await page.goto(`/?project=${projectId}`);
-  await page.getByRole('button', { name: 'Workflow history, 1 snapshot' }).click();
-  const history = page.getByRole('complementary', { name: 'Workflow history' });
+  const historyTrigger = page.getByRole('button', { name: 'Workflow history, 1 snapshot' });
+  await historyTrigger.focus();
+  await page.keyboard.press('Enter');
+  let history = page.getByRole('complementary', { name: 'Workflow history' });
+  const closeHistory = history.getByRole('button', { name: 'Close history' });
+  await expect(closeHistory).toBeFocused();
+  await closeHistory.click();
+  await expect(historyTrigger).toBeFocused();
+  await historyTrigger.click();
+  history = page.getByRole('complementary', { name: 'Workflow history' });
   await expect(history).toContainText('Preserved before PRD replacement');
   await expect(history).toContainText('gpt-5.6-luna');
   await expect(history.getByRole('button', { name: /Compare|Branch|Merge/ })).toHaveCount(0);

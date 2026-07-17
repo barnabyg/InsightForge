@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import {
   generatedStageNames,
   type WorkflowSnapshot,
@@ -21,9 +21,18 @@ export function WorkflowHistoryDrawer({
   onRequestRestore,
   onRequestDelete,
 }: WorkflowHistoryDrawerProps) {
+  const closeButton = useRef<HTMLButtonElement>(null);
   const [selected, setSelected] = useState<WorkflowSnapshot | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement;
+    closeButton.current?.focus();
+    return () => {
+      if (previouslyFocused instanceof HTMLElement) previouslyFocused.focus();
+    };
+  }, []);
 
   async function inspect(snapshotId: string) {
     setLoading(true);
@@ -53,7 +62,12 @@ export function WorkflowHistoryDrawer({
           <p className={styles.eyebrow}>Project history</p>
           <h2>{selected ? 'Snapshot inspection' : 'Workflow Snapshots'}</h2>
         </div>
-        <button className={styles['secondary-action']} type="button" onClick={onClose}>
+        <button
+          ref={closeButton}
+          className={styles['secondary-action']}
+          type="button"
+          onClick={onClose}
+        >
           Close history
         </button>
       </header>
