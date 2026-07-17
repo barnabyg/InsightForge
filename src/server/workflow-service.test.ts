@@ -1584,6 +1584,68 @@ describe('Workflow service', () => {
     expect(projects.getProject(project.id)?.insightSource).toBe(originalInsight);
   });
 
+  it('snapshots a partial current workflow when an Insight Revision is promoted', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const originalInsight = 'Renters need a clear way to compare neighbourhood trade-offs.';
+    const revisedInsight = 'Renters need to compare neighbourhoods, commutes, and accessibility.';
+    const project = projects.createProject({ insightSource: originalInsight });
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief(input) {
+          return {
+            markdown: `# Design Brief\n\n${input.insightSource}\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: 'resp_partial_revision_brief',
+            requestId: 'req_partial_revision_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          return {
+            markdown: `# PRD\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: 'resp_partial_revision_prd',
+            requestId: 'req_partial_revision_prd',
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngFixture(input.ordinal * 45),
+            requestId: `req_partial_revision_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+
+    const partial = await workflows.generateDesignBrief(project.id);
+    workflows.beginInsightRevision(project.id);
+    workflows.updateInsightRevision(project.id, revisedInsight);
+    let candidate = await workflows.generateInsightRevision(project.id);
+    while (candidate.candidate?.status === 'paused') {
+      candidate = await workflows.resumeFullWorkflow(project.id);
+    }
+
+    const promoted = workflows.promoteFullWorkflow(project.id);
+
+    expect(projects.getProject(project.id)?.insightSource).toBe(revisedInsight);
+    expect(promoted.snapshots).toEqual([expect.objectContaining({
+      replacedFromStage: 'design_brief',
+      insightSource: originalInsight,
+      artifactIds: {
+        designBrief: partial.designBrief?.id,
+        conceptScreens: null,
+        prd: null,
+      },
+    })]);
+  });
+
   it('resumes an Insight Revision candidate and promotes its source and workflow atomically', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);

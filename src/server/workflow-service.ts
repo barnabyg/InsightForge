@@ -165,9 +165,9 @@ interface WorkflowSnapshotRow {
   created_at: string;
   replaced_from_stage: GeneratedStageId;
   insight_source: string;
-  design_brief_artifact_id: string;
-  concept_screen_artifact_id: string;
-  prd_artifact_id: string;
+  design_brief_artifact_id: string | null;
+  concept_screen_artifact_id: string | null;
+  prd_artifact_id: string | null;
 }
 
 interface CandidateConfigurations {
@@ -931,7 +931,7 @@ export async function openWorkflowService(
     emitCandidateProgress(candidate, 'promoting', 'promotion', null, 5);
     database.exec('BEGIN IMMEDIATE;');
     try {
-      if (currentDesignBrief && currentConceptScreens && currentPrd) {
+      if (currentDesignBrief || currentConceptScreens || currentPrd) {
         database.prepare(`
           INSERT INTO workflow_snapshots (
             id, project_id, created_at, replaced_from_stage, insight_source,
@@ -943,9 +943,9 @@ export async function openWorkflowService(
           now().toISOString(),
           candidate.start_stage,
           project.insight_source,
-          currentDesignBrief.id,
-          currentConceptScreens.id,
-          currentPrd.id,
+          currentDesignBrief?.id ?? null,
+          currentConceptScreens?.id ?? null,
+          currentPrd?.id ?? null,
         );
       }
       const setCurrent = database.prepare(`

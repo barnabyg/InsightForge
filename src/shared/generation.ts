@@ -167,9 +167,9 @@ export interface WorkflowSnapshotSummary {
   replacedFromStage: GeneratedStageId;
   insightSource: string;
   artifactIds: {
-    designBrief: string;
-    conceptScreens: string;
-    prd: string;
+    designBrief: string | null;
+    conceptScreens: string | null;
+    prd: string | null;
   };
 }
 

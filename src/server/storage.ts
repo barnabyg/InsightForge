@@ -44,7 +44,7 @@ export async function initializeStorage(
         value TEXT NOT NULL
       );
       INSERT INTO app_metadata (key, value)
-      VALUES ('schema_version', '6')
+      VALUES ('schema_version', '7')
       ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
       CREATE TABLE IF NOT EXISTS projects (
@@ -138,11 +138,11 @@ export async function initializeStorage(
         replaced_from_stage TEXT NOT NULL
           CHECK (replaced_from_stage IN ('design_brief', 'concept_screens', 'prd')),
         insight_source TEXT NOT NULL,
-        design_brief_artifact_id TEXT NOT NULL
+        design_brief_artifact_id TEXT
           REFERENCES artifacts(id) ON DELETE RESTRICT,
-        concept_screen_artifact_id TEXT NOT NULL
+        concept_screen_artifact_id TEXT
           REFERENCES artifacts(id) ON DELETE RESTRICT,
-        prd_artifact_id TEXT NOT NULL
+        prd_artifact_id TEXT
           REFERENCES artifacts(id) ON DELETE RESTRICT
       );
 
@@ -272,7 +272,7 @@ export async function initializeStorage(
     }
 
     const snapshotColumns = database.prepare('PRAGMA table_info(workflow_snapshots)')
-      .all() as unknown as Array<{ name: string }>;
+      .all() as unknown as Array<{ name: string; notnull: number }>;
     if (!snapshotColumns.some(({ name }) => name === 'insight_source')) {
       database.exec('ALTER TABLE workflow_snapshots ADD COLUMN insight_source TEXT;');
       database.exec(`
@@ -284,6 +284,37 @@ export async function initializeStorage(
           WHERE artifact.id = workflow_snapshots.design_brief_artifact_id
         )
         WHERE insight_source IS NULL;
+      `);
+    }
+    if (snapshotColumns.some(({ name, notnull }) =>
+      name.endsWith('_artifact_id') && notnull === 1)) {
+      database.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE workflow_snapshots_v7 (
+          id TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL
+            REFERENCES projects(id) ON DELETE CASCADE,
+          created_at TEXT NOT NULL,
+          replaced_from_stage TEXT NOT NULL
+            CHECK (replaced_from_stage IN ('design_brief', 'concept_screens', 'prd')),
+          insight_source TEXT NOT NULL,
+          design_brief_artifact_id TEXT
+            REFERENCES artifacts(id) ON DELETE RESTRICT,
+          concept_screen_artifact_id TEXT
+            REFERENCES artifacts(id) ON DELETE RESTRICT,
+          prd_artifact_id TEXT
+            REFERENCES artifacts(id) ON DELETE RESTRICT
+        );
+        INSERT INTO workflow_snapshots_v7 (
+          id, project_id, created_at, replaced_from_stage, insight_source,
+          design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+        )
+        SELECT id, project_id, created_at, replaced_from_stage, insight_source,
+               design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+        FROM workflow_snapshots;
+        DROP TABLE workflow_snapshots;
+        ALTER TABLE workflow_snapshots_v7 RENAME TO workflow_snapshots;
+        COMMIT;
       `);
     }
 
