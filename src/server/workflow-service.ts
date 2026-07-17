@@ -425,6 +425,7 @@ export async function openWorkflowService(
     runId: string;
     cancelRequested: boolean;
   }>();
+  const activePrdRuns = new Set<string>();
   const conceptProgressListeners = new Map<
     string,
     Set<(event: ConceptScreenProgressEvent) => void>
@@ -639,6 +640,11 @@ export async function openWorkflowService(
           'Regenerate the complete downstream workflow to replace a current PRD consistently.',
         );
       }
+      if (activePrdRuns.has(projectId)) {
+        throw new WorkflowValidationError(
+          'PRD generation is already running for this Project.',
+        );
+      }
       const configuration = designBriefConfiguration();
       const requiresDownstreamCascade = Boolean(database.prepare(`
         SELECT 1
@@ -783,6 +789,11 @@ export async function openWorkflowService(
 
     async generateConceptScreens(projectId) {
       requireProject(projectId);
+      if (activePrdRuns.has(projectId)) {
+        throw new WorkflowValidationError(
+          'PRD generation is already running for this Project.',
+        );
+      }
       if (hasCurrentPrd(projectId)) {
         throw new WorkflowValidationError(
           'Regenerate the PRD with any new Concept Screen Set to keep the workflow consistent.',
@@ -1182,6 +1193,23 @@ export async function openWorkflowService(
 
     async generatePrd(projectId) {
       requireProject(projectId);
+      if (activePrdRuns.has(projectId)) {
+        throw new WorkflowValidationError(
+          'PRD generation is already running for this Project.',
+        );
+      }
+      if (activeConceptRuns.has(projectId)) {
+        throw new WorkflowValidationError(
+          'Concept Screen generation is already running for this Project.',
+        );
+      }
+      if (pendingDesignBriefCandidate(projectId)) {
+        throw new WorkflowValidationError(
+          'Finish or resume the pending downstream cascade before generating a PRD.',
+        );
+      }
+      activePrdRuns.add(projectId);
+      try {
       const designBrief = database.prepare(`
         SELECT artifact.id, artifact.project_id, artifact.run_id,
                artifact.markdown, artifact.created_at, artifact.validation_json
@@ -1284,6 +1312,24 @@ export async function openWorkflowService(
         const message = boundaryError?.message
           ?? validationError?.message
           ?? 'PRD generation failed.';
+        const currentDesignBrief = database.prepare(`
+          SELECT artifact_id
+          FROM current_artifacts
+          WHERE project_id = ? AND stage_id = 'design_brief'
+        `).get(projectId) as unknown as { artifact_id: string } | undefined;
+        const currentConceptScreenSet = database.prepare(`
+          SELECT artifact_id
+          FROM current_artifacts
+          WHERE project_id = ? AND stage_id = 'concept_screens'
+        `).get(projectId) as unknown as { artifact_id: string } | undefined;
+        if (
+          currentDesignBrief?.artifact_id !== designBrief.id
+          || currentConceptScreenSet?.artifact_id !== conceptScreenSet.id
+        ) {
+          throw new WorkflowValidationError(
+            'PRD inputs changed before promotion; run the stage again with the current workflow.',
+          );
+        }
         database.prepare(`
           UPDATE stage_runs
           SET status = 'failed', completed_at = ?, duration_ms = ?,
@@ -1342,9 +1388,31 @@ export async function openWorkflowService(
         database.exec('COMMIT;');
       } catch (error) {
         database.exec('ROLLBACK;');
-        throw error;
+        const failedAt = now();
+        const code = error instanceof WorkflowValidationError
+          ? 'invalid_artifact'
+          : 'generation_failed';
+        const message = error instanceof WorkflowValidationError
+          ? error.message
+          : 'PRD promotion failed.';
+        database.prepare(`
+          UPDATE stage_runs
+          SET status = 'failed', completed_at = ?, duration_ms = ?,
+              error_code = ?, error_message = ?
+          WHERE id = ?
+        `).run(
+          failedAt.toISOString(),
+          Math.max(0, failedAt.getTime() - startedAt.getTime()),
+          code,
+          message,
+          runId,
+        );
+        throw new WorkflowGenerationError(code, message);
       }
       return readProjectWorkflow(projectId);
+      } finally {
+        activePrdRuns.delete(projectId);
+      }
     },
 
     cancelConceptScreens(projectId) {

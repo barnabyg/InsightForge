@@ -753,4 +753,138 @@ describe('Workflow service', () => {
     workflowServices.push(reopened);
     expect(reopened.getProjectWorkflow(project.id).prd).toEqual(generated.prd);
   });
+
+  it('rejects PRD generation while a failed upstream cascade candidate is pending', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({ insightSource: 'Keep candidate lineage coherent.' });
+    let briefVersion = 0;
+    let failCascade = false;
+    let prdCalls = 0;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          briefVersion += 1;
+          return {
+            markdown: `# Design Brief\n\nVersion ${briefVersion}`,
+            responseId: `resp_brief_${briefVersion}`,
+            requestId: `req_brief_${briefVersion}`,
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+        async generatePrd() {
+          prdCalls += 1;
+          return {
+            markdown: '# PRD\n\nMust not run for mixed inputs.',
+            responseId: 'resp_unexpected_prd',
+            requestId: 'req_unexpected_prd',
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          if (failCascade && input.ordinal === 1) {
+            throw new GenerationBoundaryError(
+              'openai_request_failed',
+              'Candidate screen generation failed safely.',
+            );
+          }
+          return {
+            png: pngFixture(input.ordinal * 30),
+            requestId: `req_screen_${briefVersion}_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await workflows.generateDesignBrief(project.id);
+    await workflows.generateConceptScreens(project.id);
+
+    failCascade = true;
+    await expect(workflows.generateDesignBrief(project.id)).rejects.toMatchObject({
+      code: 'openai_request_failed',
+    });
+    await expect(workflows.generatePrd(project.id)).rejects.toThrow(
+      'Finish or resume the pending downstream cascade before generating a PRD.',
+    );
+    expect(prdCalls).toBe(0);
+  });
+
+  it('serializes PRD and Concept Screen generation for each Project', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({ insightSource: 'Do not overlap workflow generations.' });
+    let holdConcept = false;
+    let conceptStarted!: () => void;
+    let releaseConcept!: () => void;
+    const conceptDidStart = new Promise<void>((resolve) => { conceptStarted = resolve; });
+    const conceptCanFinish = new Promise<void>((resolve) => { releaseConcept = resolve; });
+    let prdStarted!: () => void;
+    let releasePrd!: () => void;
+    const prdDidStart = new Promise<void>((resolve) => { prdStarted = resolve; });
+    const prdCanFinish = new Promise<void>((resolve) => { releasePrd = resolve; });
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          return {
+            markdown: '# Design Brief\n\nA coherent three-screen journey.',
+            responseId: 'resp_serial_brief',
+            requestId: 'req_serial_brief',
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+        async generatePrd() {
+          prdStarted();
+          await prdCanFinish;
+          return {
+            markdown: '# PRD\n\nA coherent final artifact.',
+            responseId: 'resp_serial_prd',
+            requestId: 'req_serial_prd',
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          if (holdConcept && input.ordinal === 1) {
+            conceptStarted();
+            await conceptCanFinish;
+          }
+          return {
+            png: pngFixture(input.ordinal * 35),
+            requestId: `req_serial_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await workflows.generateDesignBrief(project.id);
+    await workflows.generateConceptScreens(project.id);
+
+    holdConcept = true;
+    const conceptGeneration = workflows.generateConceptScreens(project.id);
+    await conceptDidStart;
+    await expect(workflows.generatePrd(project.id)).rejects.toThrow(
+      'Concept Screen generation is already running for this Project.',
+    );
+    releaseConcept();
+    await conceptGeneration;
+
+    const prdGeneration = workflows.generatePrd(project.id);
+    await prdDidStart;
+    await expect(workflows.generateConceptScreens(project.id)).rejects.toThrow(
+      'PRD generation is already running for this Project.',
+    );
+    releasePrd();
+    await prdGeneration;
+  });
 });
