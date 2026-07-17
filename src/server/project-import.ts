@@ -804,12 +804,6 @@ export function importProjectExport(
   archive: Buffer,
   importedAt: Date,
 ): Project {
-  if (archive.byteLength > 250 * 1024 * 1024) {
-    throw new ProjectImportError(
-      'project_import_archive_too_large',
-      'Project Export is larger than the 250 MB import limit.',
-    );
-  }
   let files: Record<string, Uint8Array>;
   try {
     files = unzipSync(archive);
@@ -817,14 +811,6 @@ export function importProjectExport(
     throw new ProjectImportError(
       'project_import_archive_invalid',
       'The selected file is not a readable Project Export archive.',
-    );
-  }
-  if (Object.keys(files).length > 10_000) invalidStructure('Project Export contains too many files.');
-  const totalBytes = Object.values(files).reduce((total, bytes) => total + bytes.byteLength, 0);
-  if (totalBytes > 500 * 1024 * 1024) {
-    throw new ProjectImportError(
-      'project_import_archive_too_large',
-      'Project Export expands beyond the 500 MB import limit.',
     );
   }
   const manifest = validateManifest(files);

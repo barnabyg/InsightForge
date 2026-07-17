@@ -55,7 +55,7 @@ export function registerWorkflowRoutes(
 ): void {
   app.addContentTypeParser(
     'application/zip',
-    { parseAs: 'buffer', bodyLimit: 250 * 1024 * 1024 },
+    { parseAs: 'buffer', bodyLimit: Number.MAX_SAFE_INTEGER },
     (_request, body, done) => done(null, body),
   );
 
