@@ -12,6 +12,7 @@ import type {
 import { initializeStorage } from './storage.js';
 import {
   isCompatibleImageModel,
+  isCompatibleMultimodalTextModel,
   isCompatibleTextModel,
 } from './model-discovery.js';
 import {
@@ -177,8 +178,14 @@ export async function openWorkflowConfigurationService(
         'OpenAI model cannot be empty',
       );
     }
+    if (stageId === 'prd' && !isCompatibleMultimodalTextModel(input.model.trim())) {
+      throw new WorkflowConfigurationValidationError(
+        'PRD requires a compatible multimodal text model',
+      );
+    }
     if (
       definition.kind === 'text'
+      && stageId !== 'prd'
       && !isCompatibleTextModel(input.model.trim())
     ) {
       throw new WorkflowConfigurationValidationError(

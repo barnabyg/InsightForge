@@ -26,6 +26,12 @@ describe('OpenAI model discovery boundary', () => {
         { id: 'gpt-5.4-mini' },
         { id: 'gpt-4.1' },
         { id: 'gpt-4o' },
+        { id: 'o1' },
+        { id: 'o1-mini' },
+        { id: 'o1-preview' },
+        { id: 'o3' },
+        { id: 'o3-mini' },
+        { id: 'o4-mini' },
         { id: 'gpt-4' },
         { id: 'gpt-4-turbo' },
         { id: 'gpt-3.5-turbo' },
@@ -51,7 +57,14 @@ describe('OpenAI model discovery boundary', () => {
       maxRetries: 0,
     });
     expect(result).toEqual({
-      text: ['gpt-4.1', 'gpt-4o', 'gpt-5.4-mini', 'gpt-5.6-luna'],
+      text: [
+        'gpt-4.1', 'gpt-4o', 'gpt-5.4-mini', 'gpt-5.6-luna',
+        'o1', 'o1-mini', 'o1-preview', 'o3', 'o3-mini', 'o4-mini',
+      ],
+      multimodalText: [
+        'gpt-4.1', 'gpt-4o', 'gpt-5.4-mini', 'gpt-5.6-luna',
+        'o1', 'o3', 'o4-mini',
+      ],
       image: ['gpt-image-1.5', 'gpt-image-2'],
     });
   });

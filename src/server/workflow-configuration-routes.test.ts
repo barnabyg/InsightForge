@@ -67,6 +67,7 @@ describe('Workflow Configuration HTTP API', () => {
     expect(models.statusCode).toBe(200);
     expect(models.json()).toEqual({
       text: ['gpt-5.6-luna'],
+      multimodalText: ['gpt-5.6-luna'],
       image: ['gpt-image-2'],
       source: 'mock',
       checkedAt: '2026-07-16T16:00:00.000Z',

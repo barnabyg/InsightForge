@@ -148,9 +148,14 @@ function StageEditor({
   const changed = prompt !== stage.prompt
     || model !== stage.model
     || imageQuality !== stage.imageQuality;
+  const discoveredModels = stage.id === 'prd'
+    ? models.multimodalText
+    : stage.kind === 'text'
+      ? models.text
+      : models.image;
   const modelOptions = [...new Set([
     stage.model,
-    ...(stage.kind === 'text' ? models.text : models.image),
+    ...discoveredModels,
   ])].sort();
   const matchCount = useMemo(() => {
     if (!search) return 0;
@@ -427,7 +432,7 @@ export function WorkflowConfigurationPage() {
 
       <section className={styles['model-catalog-bar']}>
         <span><span className={styles['catalog-dot']} aria-hidden="true" /> {catalogLabel}</span>
-        <span>{controller.models.text.length} text · {controller.models.image.length} image</span>
+        <span>{controller.models.text.length} text · {controller.models.multimodalText.length} PRD · {controller.models.image.length} image</span>
         <button type="button" onClick={() => void controller.refreshModels()}>Refresh models</button>
       </section>
 

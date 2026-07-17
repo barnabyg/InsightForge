@@ -53,6 +53,7 @@ export interface WorkflowConfigurationExport {
 
 export interface ModelCatalog {
   text: string[];
+  multimodalText: string[];
   image: string[];
   source: 'live' | 'cache' | 'defaults' | 'mock';
   checkedAt: string;
