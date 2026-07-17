@@ -173,6 +173,12 @@ interface WorkflowSnapshotRow {
   prd_artifact_id: string | null;
 }
 
+const workflowSnapshotSelection = `
+  SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
+         design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+  FROM workflow_snapshots
+`;
+
 interface CandidateConfigurations {
   designBrief: ConfigurationRow;
   conceptScreens: ConfigurationRow & { image_quality: ImageQuality };
@@ -838,10 +844,7 @@ export async function openWorkflowService(
   }
 
   function workflowSnapshots(projectId: string): WorkflowSnapshotSummary[] {
-    const rows = database.prepare(`
-      SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
-             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
-      FROM workflow_snapshots
+    const rows = database.prepare(`${workflowSnapshotSelection}
       WHERE project_id = ?
       ORDER BY created_at DESC, rowid DESC
     `).all(projectId) as unknown as WorkflowSnapshotRow[];
@@ -898,10 +901,7 @@ export async function openWorkflowService(
     snapshotId: string,
   ): WorkflowSnapshot {
     requireProject(projectId);
-    const row = database.prepare(`
-      SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
-             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
-      FROM workflow_snapshots
+    const row = database.prepare(`${workflowSnapshotSelection}
       WHERE id = ? AND project_id = ?
     `).get(snapshotId, projectId) as unknown as WorkflowSnapshotRow | undefined;
     if (!row) {
@@ -935,10 +935,7 @@ export async function openWorkflowService(
     snapshotId: string,
   ): ProjectWorkflow {
     const project = requireProject(projectId);
-    const selected = database.prepare(`
-      SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
-             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
-      FROM workflow_snapshots
+    const selected = database.prepare(`${workflowSnapshotSelection}
       WHERE id = ? AND project_id = ?
     `).get(snapshotId, projectId) as unknown as WorkflowSnapshotRow | undefined;
     if (!selected) {
@@ -1024,10 +1021,7 @@ export async function openWorkflowService(
     snapshotId: string,
   ): Promise<ProjectWorkflow> {
     requireProject(projectId);
-    const snapshot = database.prepare(`
-      SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
-             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
-      FROM workflow_snapshots
+    const snapshot = database.prepare(`${workflowSnapshotSelection}
       WHERE id = ? AND project_id = ?
     `).get(snapshotId, projectId) as unknown as WorkflowSnapshotRow | undefined;
     if (!snapshot) {
