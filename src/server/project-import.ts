@@ -172,7 +172,10 @@ export const defaultProjectImportLimits: ProjectImportLimits = {
   maxEntries: 10_000,
 };
 
-function supportedLimitError(limit: number, kind: 'archive' | 'expanded'): ProjectImportError {
+export function projectImportLimitError(
+  limit: number,
+  kind: 'archive' | 'expanded',
+): ProjectImportError {
   return new ProjectImportError(
     'project_import_archive_too_large',
     `Project Export exceeds the supported ${limit} byte ${kind} limit.`,
@@ -924,7 +927,7 @@ export function importProjectExport(
   limits: ProjectImportLimits = defaultProjectImportLimits,
 ): Project {
   if (archive.byteLength > limits.maxArchiveBytes) {
-    throw supportedLimitError(limits.maxArchiveBytes, 'archive');
+    throw projectImportLimitError(limits.maxArchiveBytes, 'archive');
   }
   let files: Record<string, Uint8Array>;
   try {
@@ -941,7 +944,7 @@ export function importProjectExport(
           );
         }
         if (expandedBytes > limits.maxExpandedBytes) {
-          throw supportedLimitError(limits.maxExpandedBytes, 'expanded');
+          throw projectImportLimitError(limits.maxExpandedBytes, 'expanded');
         }
         return true;
       },

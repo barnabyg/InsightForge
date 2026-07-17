@@ -2,6 +2,7 @@ import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { WorkflowRerunRequest } from '../shared/generation.js';
 import {
   defaultProjectImportLimits,
+  projectImportLimitError,
   ProjectImportError,
   type ProjectImportLimits,
 } from './project-import.js';
@@ -53,13 +54,6 @@ function handleWorkflowError(error: unknown, reply: FastifyReply) {
   throw error;
 }
 
-function supportedArchiveLimitError(limit: number): ProjectImportError {
-  return new ProjectImportError(
-    'project_import_archive_too_large',
-    `Project Export exceeds the supported ${limit} byte archive limit.`,
-  );
-}
-
 export function registerWorkflowRoutes(
   app: FastifyInstance,
   workflows: WorkflowService,
@@ -87,7 +81,7 @@ export function registerWorkflowRoutes(
         'The selected file could not be read as a Project Export archive.',
       )));
       stream.once('end', () => done(null, oversized
-        ? supportedArchiveLimitError(importLimits.maxArchiveBytes)
+        ? projectImportLimitError(importLimits.maxArchiveBytes, 'archive')
         : Buffer.concat(chunks, byteSize)));
     },
   );
