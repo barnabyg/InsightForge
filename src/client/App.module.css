@@ -489,7 +489,7 @@ a {
 
 .modal-backdrop {
   position: fixed;
-  z-index: 20;
+  z-index: 60;
   inset: 0;
   padding: 24px;
   display: grid;
@@ -672,6 +672,170 @@ a {
 
 .stage-rail .local-note {
   margin-top: auto;
+}
+
+.history-trigger {
+  width: 100%;
+  margin-top: 22px;
+  padding: 12px 8px;
+  display: grid;
+  grid-template-columns: 31px minmax(0, 1fr);
+  align-items: center;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--surface);
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+}
+
+.history-trigger:hover {
+  border-color: var(--accent);
+}
+
+.history-trigger strong,
+.history-trigger small {
+  display: block;
+}
+
+.history-trigger small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 400;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.history-drawer {
+  position: fixed;
+  z-index: 40;
+  top: 76px;
+  right: 0;
+  bottom: 0;
+  width: min(620px, 100vw);
+  padding: 28px;
+  overflow-y: auto;
+  border-left: 1px solid var(--line);
+  background: var(--canvas);
+  box-shadow: -22px 0 56px rgb(27 32 51 / 16%);
+}
+
+.history-heading {
+  position: sticky;
+  z-index: 1;
+  top: -28px;
+  margin: -28px -28px 24px;
+  padding: 24px 28px 18px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+  border-bottom: 1px solid var(--line);
+  background: var(--canvas);
+}
+
+.history-heading h2 {
+  margin: 4px 0 0;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 25px;
+  font-weight: 500;
+}
+
+.snapshot-list {
+  display: grid;
+  gap: 14px;
+}
+
+.snapshot-list > article,
+.snapshot-artifact,
+.history-empty {
+  padding: 20px;
+  border: 1px solid var(--line);
+  background: var(--surface);
+}
+
+.snapshot-list > article > div:first-child {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.snapshot-list time {
+  flex: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.snapshot-list ul {
+  margin: 14px 0;
+  padding-left: 18px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.7;
+}
+
+.history-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.snapshot-inspection {
+  display: grid;
+  gap: 16px;
+}
+
+.snapshot-inspection > .back-link {
+  width: fit-content;
+  margin: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+}
+
+.snapshot-source {
+  display: grid;
+  gap: 8px;
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.snapshot-source textarea {
+  min-height: 110px;
+  padding: 14px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  color: var(--ink);
+  background: var(--surface);
+  font: 13px/1.55 inherit;
+}
+
+.snapshot-artifact h3 {
+  margin: 0 0 12px;
+}
+
+.snapshot-artifact pre {
+  max-height: 320px;
+  margin: 0;
+  overflow: auto;
+  white-space: pre-wrap;
+  color: var(--ink-soft);
+  font: 12px/1.6 ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.snapshot-screens {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.snapshot-screens img {
+  width: 100%;
+  border: 1px solid var(--line);
 }
 
 .artifact-canvas {

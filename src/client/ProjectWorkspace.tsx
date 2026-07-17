@@ -1,6 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
 import { generatedStageIds, generatedStageNames } from '../shared/generation.js';
-import type { CandidateWorkflow, GeneratedStageId } from '../shared/generation.js';
+import type {
+  CandidateWorkflow,
+  GeneratedStageId,
+  WorkflowSnapshotSummary,
+} from '../shared/generation.js';
 import type { Project } from '../shared/projects.js';
 import { MarkdownArtifact } from './MarkdownArtifact.js';
 import { ConceptScreenGallery } from './ConceptScreenGallery.js';
@@ -8,6 +12,7 @@ import { ConceptScreenRunInspector } from './ConceptScreenRunInspector.js';
 import { Modal } from './Modal.js';
 import { RunInspector } from './RunInspector.js';
 import { useProjectWorkflow } from './useProjectWorkflow.js';
+import { WorkflowHistoryDrawer } from './WorkflowHistoryDrawer.js';
 import styles from './App.module.css';
 
 interface ProjectWorkspaceProps {
@@ -114,6 +119,11 @@ export function ProjectWorkspace({
   const [revisionSaveState, setRevisionSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [importError, setImportError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [snapshotAction, setSnapshotAction] = useState<{
+    kind: 'restore' | 'delete';
+    snapshot: WorkflowSnapshotSummary;
+  } | null>(null);
   const workflow = useProjectWorkflow(project.id);
   const latestProjectId = useRef(project.id);
   const latestInsight = useRef(project.insightSource);
@@ -128,6 +138,8 @@ export function ProjectWorkspace({
       latestInsight.current = project.insightSource;
       savedInsight.current = project.insightSource;
       setSaveState('saved');
+      setHistoryOpen(false);
+      setSnapshotAction(null);
     }
   }, [project.id, project.insightSource]);
 
@@ -451,6 +463,22 @@ export function ProjectWorkspace({
     );
   }
 
+  async function restoreSnapshot(snapshot: WorkflowSnapshotSummary) {
+    await workflow.restoreWorkflowSnapshot(snapshot.id);
+    const restoredProject = await onRevisionPromoted();
+    setInsight(restoredProject.insightSource);
+    latestInsight.current = restoredProject.insightSource;
+    savedInsight.current = restoredProject.insightSource;
+    setSaveState('saved');
+    setSnapshotAction(null);
+    setHistoryOpen(false);
+  }
+
+  async function deleteSnapshot(snapshot: WorkflowSnapshotSummary) {
+    await workflow.deleteWorkflowSnapshot(snapshot.id);
+    setSnapshotAction(null);
+  }
+
   function updateAvailableNotice(stageId: GeneratedStageId) {
     if (rerunPlan?.earliestChangedStage !== stageId) return null;
     return (
@@ -548,6 +576,17 @@ export function ProjectWorkspace({
             </button>
           </li>
         </ol>
+        <button
+          className={styles['history-trigger']}
+          type="button"
+          aria-label={`Workflow history, ${workflow.workflow?.snapshots.length ?? 0} ${
+            (workflow.workflow?.snapshots.length ?? 0) === 1 ? 'snapshot' : 'snapshots'
+          }`}
+          onClick={() => setHistoryOpen(true)}
+        >
+          <span aria-hidden="true">â—·</span>
+          <span><strong>Workflow history</strong><small>{workflow.workflow?.snapshots.length ?? 0} preserved</small></span>
+        </button>
         <div className={styles['local-note']}>
           <span className={styles['local-note-icon']} aria-hidden="true">⌂</span>
           <div><strong>Continuously saved</strong><span>Your Project lives on this device</span></div>
@@ -989,6 +1028,48 @@ export function ProjectWorkspace({
             />
           </div>
         </main>
+      )}
+
+      {historyOpen && (
+        <WorkflowHistoryDrawer
+          projectId={project.id}
+          snapshots={workflow.workflow?.snapshots ?? []}
+          onClose={() => setHistoryOpen(false)}
+          onRequestRestore={(snapshot) => setSnapshotAction({ kind: 'restore', snapshot })}
+          onRequestDelete={(snapshot) => setSnapshotAction({ kind: 'delete', snapshot })}
+        />
+      )}
+
+      {snapshotAction?.kind === 'restore' && (
+        <Modal
+          title="Restore Workflow Snapshot?"
+          onDismiss={() => setSnapshotAction(null)}
+          actions={<>
+            <button className={styles['secondary-action']} type="button" onClick={() => setSnapshotAction(null)}>Cancel</button>
+            <button className={styles['primary-action']} type="button" onClick={() => {
+              void restoreSnapshot(snapshotAction.snapshot).catch(() => undefined);
+            }}>Restore Workflow Snapshot</button>
+          </>}
+        >
+          <p>The current workflow will be preserved as a new Workflow Snapshot before this historical workflow replaces it atomically.</p>
+          <p>The selected snapshot remains in history, and shared Stage Configurations will not change.</p>
+        </Modal>
+      )}
+
+      {snapshotAction?.kind === 'delete' && (
+        <Modal
+          title="Delete Workflow Snapshot?"
+          onDismiss={() => setSnapshotAction(null)}
+          actions={<>
+            <button className={styles['secondary-action']} type="button" onClick={() => setSnapshotAction(null)}>Cancel</button>
+            <button className={styles['danger-action']} type="button" onClick={() => {
+              void deleteSnapshot(snapshotAction.snapshot).catch(() => undefined);
+            }}>Delete Workflow Snapshot</button>
+          </>}
+        >
+          <p>This removes the snapshot from history. Artifacts still used by the current workflow or another snapshot remain available.</p>
+          <p>Any unreferenced Concept Screen files will be reclaimed from local storage.</p>
+        </Modal>
       )}
 
       {revisionEditorOpen && revisionDraft !== null && (

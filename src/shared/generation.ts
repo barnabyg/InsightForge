@@ -164,6 +164,7 @@ export interface WorkflowRerunPlan {
 export interface WorkflowSnapshotSummary {
   id: string;
   createdAt: string;
+  preservedBy: 'promotion' | 'restoration';
   replacedFromStage: GeneratedStageId;
   insightSource: string;
   artifactIds: {
@@ -171,6 +172,23 @@ export interface WorkflowSnapshotSummary {
     conceptScreens: string | null;
     prd: string | null;
   };
+  stages: Array<{
+    stageId: GeneratedStageId;
+    artifactId: string;
+    runId: string;
+    runKind: RunKind;
+    model: string;
+    createdAt: string;
+  }>;
+}
+
+export interface WorkflowSnapshot extends WorkflowSnapshotSummary {
+  designBrief: DesignBriefArtifact | null;
+  designBriefRun: DesignBriefRun | null;
+  conceptScreenSet: ConceptScreenSetArtifact | null;
+  conceptScreenRun: ConceptScreenRun | null;
+  prd: PrdArtifact | null;
+  prdRun: PrdRun | null;
 }
 
 export interface WorkflowRerunRequest {

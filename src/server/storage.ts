@@ -135,6 +135,8 @@ export async function initializeStorage(
         project_id TEXT NOT NULL
           REFERENCES projects(id) ON DELETE CASCADE,
         created_at TEXT NOT NULL,
+        preserved_by TEXT NOT NULL DEFAULT 'promotion'
+          CHECK (preserved_by IN ('promotion', 'restoration')),
         replaced_from_stage TEXT NOT NULL
           CHECK (replaced_from_stage IN ('design_brief', 'concept_screens', 'prd')),
         insight_source TEXT NOT NULL,
@@ -273,6 +275,13 @@ export async function initializeStorage(
 
     const snapshotColumns = database.prepare('PRAGMA table_info(workflow_snapshots)')
       .all() as unknown as Array<{ name: string; notnull: number }>;
+    if (!snapshotColumns.some(({ name }) => name === 'preserved_by')) {
+      database.exec(`
+        ALTER TABLE workflow_snapshots
+        ADD COLUMN preserved_by TEXT NOT NULL DEFAULT 'promotion'
+          CHECK (preserved_by IN ('promotion', 'restoration'));
+      `);
+    }
     if (!snapshotColumns.some(({ name }) => name === 'insight_source')) {
       database.exec('ALTER TABLE workflow_snapshots ADD COLUMN insight_source TEXT;');
       database.exec(`
@@ -295,6 +304,8 @@ export async function initializeStorage(
           project_id TEXT NOT NULL
             REFERENCES projects(id) ON DELETE CASCADE,
           created_at TEXT NOT NULL,
+          preserved_by TEXT NOT NULL DEFAULT 'promotion'
+            CHECK (preserved_by IN ('promotion', 'restoration')),
           replaced_from_stage TEXT NOT NULL
             CHECK (replaced_from_stage IN ('design_brief', 'concept_screens', 'prd')),
           insight_source TEXT NOT NULL,
@@ -306,10 +317,10 @@ export async function initializeStorage(
             REFERENCES artifacts(id) ON DELETE RESTRICT
         );
         INSERT INTO workflow_snapshots_v7 (
-          id, project_id, created_at, replaced_from_stage, insight_source,
+          id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
           design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
         )
-        SELECT id, project_id, created_at, replaced_from_stage, insight_source,
+        SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
                design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
         FROM workflow_snapshots;
         DROP TABLE workflow_snapshots;

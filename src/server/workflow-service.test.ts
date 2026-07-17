@@ -1267,6 +1267,139 @@ describe('Workflow service', () => {
     expect(projects.listProjects()[0]?.updateAvailable).toBe(false);
   });
 
+  it('inspects a Workflow Snapshot with its read-only Artifacts and Stage Run provenance', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'Snapshot history should keep coherent product work inspectable.',
+    });
+    let version = 0;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          version += 1;
+          return {
+            markdown: `# Design Brief ${version}\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: `resp_brief_${version}`,
+            requestId: `req_brief_${version}`,
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          return {
+            markdown: `# PRD ${version}\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: `resp_prd_${version}`,
+            requestId: `req_prd_${version}`,
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngFixture(version * 30 + input.ordinal),
+            requestId: `req_screen_${version}_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await completeFullWorkflow(workflows, project.id);
+    const original = workflows.promoteFullWorkflow(project.id);
+    let candidate = await workflows.regenerateWorkflow(project.id, 'design_brief');
+    while (candidate.candidate?.status === 'paused') {
+      candidate = await workflows.resumeFullWorkflow(project.id);
+    }
+    const regenerated = workflows.promoteFullWorkflow(project.id);
+    const summary = regenerated.snapshots[0]!;
+
+    expect(summary).toMatchObject({
+      preservedBy: 'promotion',
+      replacedFromStage: 'design_brief',
+      artifactIds: {
+        designBrief: original.designBrief?.id,
+        conceptScreens: original.conceptScreenSet?.id,
+        prd: original.prd?.id,
+      },
+      stages: [
+        { stageId: 'design_brief', runKind: 'initial', model: expect.any(String) },
+        { stageId: 'concept_screens', runKind: 'initial', model: expect.any(String) },
+        { stageId: 'prd', runKind: 'initial', model: expect.any(String) },
+      ],
+    });
+    expect(workflows.getWorkflowSnapshot(project.id, summary.id)).toMatchObject({
+      ...summary,
+      designBrief: original.designBrief,
+      designBriefRun: original.lastDesignBriefRun,
+      conceptScreenSet: original.conceptScreenSet,
+      conceptScreenRun: original.lastConceptScreenRun,
+      prd: original.prd,
+      prdRun: original.lastPrdRun,
+    });
+
+    const globalConfiguration = await openWorkflowConfigurationService(dataDirectory);
+    const currentDesignBriefConfiguration = globalConfiguration
+      .getWorkflowConfiguration().stages.find(({ id }) => id === 'design_brief')!;
+    globalConfiguration.commitStageConfiguration('design_brief', {
+      prompt: `${currentDesignBriefConfiguration.prompt}\nKeep this global improvement.`,
+      model: currentDesignBriefConfiguration.model,
+      imageQuality: null,
+    });
+    const configuredPrompt = globalConfiguration.getWorkflowConfiguration()
+      .stages.find(({ id }) => id === 'design_brief')!.prompt;
+    globalConfiguration.close();
+
+    const restored = workflows.restoreWorkflowSnapshot(project.id, summary.id);
+
+    expect(restored).toMatchObject({
+      designBrief: { id: original.designBrief?.id },
+      conceptScreenSet: { id: original.conceptScreenSet?.id },
+      prd: { id: original.prd?.id },
+      snapshots: [
+        {
+          preservedBy: 'restoration',
+          replacedFromStage: 'design_brief',
+          artifactIds: {
+            designBrief: regenerated.designBrief?.id,
+            conceptScreens: regenerated.conceptScreenSet?.id,
+            prd: regenerated.prd?.id,
+          },
+        },
+        expect.objectContaining({ id: summary.id }),
+      ],
+    });
+    expect(workflows.getWorkflowSnapshot(project.id, summary.id).id).toBe(summary.id);
+    const unchangedConfiguration = await openWorkflowConfigurationService(dataDirectory);
+    expect(unchangedConfiguration.getWorkflowConfiguration()
+      .stages.find(({ id }) => id === 'design_brief')!.prompt)
+      .toBe(configuredPrompt);
+    unchangedConfiguration.close();
+
+    const restoredAssetId = original.conceptScreenSet!.screens[0]!.assetId;
+    const replacedAssetId = regenerated.conceptScreenSet!.screens[0]!.assetId;
+    const restorationSnapshotId = restored.snapshots[0]!.id;
+    const afterSelectedDeletion = await workflows.deleteWorkflowSnapshot(
+      project.id,
+      summary.id,
+    );
+    expect(afterSelectedDeletion.snapshots.map(({ id }) => id))
+      .toEqual([restorationSnapshotId]);
+    expect(workflows.getConceptScreenAsset(project.id, restoredAssetId))
+      .toEqual(pngFixture(31));
+
+    const afterReplacedDeletion = await workflows.deleteWorkflowSnapshot(
+      project.id,
+      restorationSnapshotId,
+    );
+    expect(afterReplacedDeletion.snapshots).toEqual([]);
+    expect(() => workflows.getConceptScreenAsset(project.id, replacedAssetId))
+      .toThrow(replacedAssetId);
+  });
+
   it('regenerates from Concept Screens when its prompt or image settings change', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);

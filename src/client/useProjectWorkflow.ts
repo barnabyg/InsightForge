@@ -41,6 +41,8 @@ export interface ProjectWorkflowController {
   promoteFullWorkflow(): Promise<ProjectWorkflow>;
   keepCandidateAfterWarningReview(): Promise<ProjectWorkflow>;
   discardFullWorkflow(): Promise<ProjectWorkflow>;
+  restoreWorkflowSnapshot(snapshotId: string): Promise<ProjectWorkflow>;
+  deleteWorkflowSnapshot(snapshotId: string): Promise<ProjectWorkflow>;
   cancelFullWorkflow(): Promise<void>;
   cancelConceptScreens(): Promise<void>;
   clearError(): void;
@@ -287,6 +289,26 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
       );
       setWorkflow(next);
       setFullGenerationProgress(null);
+      return next;
+    },
+
+    async restoreWorkflowSnapshot(snapshotId) {
+      setError(null);
+      const next = await requestWorkflow(
+        `/api/projects/${projectId}/workflow-snapshots/${snapshotId}/restoration`,
+        { method: 'POST' },
+      );
+      setWorkflow(next);
+      return next;
+    },
+
+    async deleteWorkflowSnapshot(snapshotId) {
+      setError(null);
+      const next = await requestWorkflow(
+        `/api/projects/${projectId}/workflow-snapshots/${snapshotId}`,
+        { method: 'DELETE' },
+      );
+      setWorkflow(next);
       return next;
     },
 

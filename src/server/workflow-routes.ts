@@ -11,6 +11,10 @@ interface ProjectParameters {
   id: string;
 }
 
+interface WorkflowSnapshotParameters extends ProjectParameters {
+  snapshotId: string;
+}
+
 interface InsightRevisionPatch {
   insightSource?: unknown;
 }
@@ -152,6 +156,48 @@ export function registerWorkflowRoutes(
           (event) => reply.raw.write(`data: ${JSON.stringify(event)}\n\n`),
         );
         request.raw.once('close', unsubscribe);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.get<{ Params: WorkflowSnapshotParameters }>(
+    '/api/projects/:id/workflow-snapshots/:snapshotId',
+    async (request, reply) => {
+      try {
+        return workflows.getWorkflowSnapshot(
+          request.params.id,
+          request.params.snapshotId,
+        );
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: WorkflowSnapshotParameters }>(
+    '/api/projects/:id/workflow-snapshots/:snapshotId/restoration',
+    async (request, reply) => {
+      try {
+        return workflows.restoreWorkflowSnapshot(
+          request.params.id,
+          request.params.snapshotId,
+        );
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.delete<{ Params: WorkflowSnapshotParameters }>(
+    '/api/projects/:id/workflow-snapshots/:snapshotId',
+    async (request, reply) => {
+      try {
+        return await workflows.deleteWorkflowSnapshot(
+          request.params.id,
+          request.params.snapshotId,
+        );
       } catch (error) {
         return handleWorkflowError(error, reply);
       }

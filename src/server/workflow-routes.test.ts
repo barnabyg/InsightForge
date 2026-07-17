@@ -431,6 +431,66 @@ describe('Workflow HTTP API', () => {
     });
   });
 
+  it('inspects, restores, and deletes Workflow Snapshots through explicit commands', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const app = await buildApp({ dataDirectory, mode: 'mock' });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Manage coherent history',
+        insightSource: 'Authors need to inspect and deliberately restore coherent history.',
+      },
+    });
+    const projectId = created.json().id as string;
+    await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations`, headers: { host: 'localhost:4317' } });
+    await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations/resume`, headers: { host: 'localhost:4317' } });
+    await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations/resume`, headers: { host: 'localhost:4317' } });
+    const original = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations/promotion`, headers: { host: 'localhost:4317' } });
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/workflow-reruns`,
+      headers: { host: 'localhost:4317' },
+      payload: { stageId: 'prd' },
+    });
+    const varied = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations/promotion`, headers: { host: 'localhost:4317' } });
+    const snapshotId = varied.json().snapshots[0].id as string;
+
+    const inspected = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}/workflow-snapshots/${snapshotId}`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(inspected.statusCode).toBe(200);
+    expect(inspected.json()).toMatchObject({
+      id: snapshotId,
+      prd: original.json().prd,
+      prdRun: original.json().lastPrdRun,
+    });
+
+    const restored = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/workflow-snapshots/${snapshotId}/restoration`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(restored.statusCode).toBe(200);
+    expect(restored.json()).toMatchObject({
+      prd: { id: original.json().prd.id },
+      snapshots: [{ preservedBy: 'restoration' }, { id: snapshotId }],
+    });
+
+    const deleted = await app.inject({
+      method: 'DELETE',
+      url: `/api/projects/${projectId}/workflow-snapshots/${snapshotId}`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(deleted.statusCode).toBe(200);
+    expect(deleted.json().snapshots).toHaveLength(1);
+  });
+
   it('downloads the current deliverables as a named ZIP without an OpenAI check', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
     temporaryDirectories.push(dataDirectory);

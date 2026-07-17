@@ -34,6 +34,7 @@ import type {
   TextGenerationBoundary,
   TokenUsage,
   WorkflowSnapshotSummary,
+  WorkflowSnapshot,
 } from '../shared/generation.js';
 import type { ImageQuality, StageId } from '../shared/workflow-configuration.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
@@ -162,7 +163,9 @@ interface InsightRevisionRow {
 
 interface WorkflowSnapshotRow {
   id: string;
+  project_id: string;
   created_at: string;
+  preserved_by: WorkflowSnapshotSummary['preservedBy'];
   replaced_from_stage: GeneratedStageId;
   insight_source: string;
   design_brief_artifact_id: string | null;
@@ -178,6 +181,9 @@ interface CandidateConfigurations {
 
 export interface WorkflowService {
   getProjectWorkflow(projectId: string): ProjectWorkflow;
+  getWorkflowSnapshot(projectId: string, snapshotId: string): WorkflowSnapshot;
+  restoreWorkflowSnapshot(projectId: string, snapshotId: string): ProjectWorkflow;
+  deleteWorkflowSnapshot(projectId: string, snapshotId: string): Promise<ProjectWorkflow>;
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
   exportDeliverables(projectId: string): DeliverableExport;
   generateDesignBrief(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
@@ -833,15 +839,49 @@ export async function openWorkflowService(
 
   function workflowSnapshots(projectId: string): WorkflowSnapshotSummary[] {
     const rows = database.prepare(`
-      SELECT id, created_at, replaced_from_stage, insight_source,
+      SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
              design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
       FROM workflow_snapshots
       WHERE project_id = ?
       ORDER BY created_at DESC, rowid DESC
     `).all(projectId) as unknown as WorkflowSnapshotRow[];
-    return rows.map((row) => ({
+    return rows.map(snapshotSummary);
+  }
+
+  function artifactById(
+    projectId: string,
+    artifactId: string | null,
+  ): ArtifactRow | undefined {
+    if (!artifactId) return undefined;
+    return database.prepare(`
+      SELECT id, project_id, run_id, markdown, created_at, validation_json
+      FROM artifacts
+      WHERE id = ? AND project_id = ?
+    `).get(artifactId, projectId) as unknown as ArtifactRow | undefined;
+  }
+
+  function snapshotSummary(row: WorkflowSnapshotRow): WorkflowSnapshotSummary {
+    const artifactIds = [
+      ['design_brief', row.design_brief_artifact_id],
+      ['concept_screens', row.concept_screen_artifact_id],
+      ['prd', row.prd_artifact_id],
+    ] as const;
+    const stages = artifactIds.flatMap(([stageId, artifactId]) => {
+      const artifact = artifactById(row.project_id, artifactId);
+      const run = artifact ? stageRun(artifact.run_id) : undefined;
+      return artifact && run ? [{
+        stageId,
+        artifactId: artifact.id,
+        runId: run.id,
+        runKind: run.run_kind,
+        model: run.model_snapshot,
+        createdAt: artifact.created_at,
+      }] : [];
+    });
+    return {
       id: row.id,
       createdAt: row.created_at,
+      preservedBy: row.preserved_by,
       replacedFromStage: row.replaced_from_stage,
       insightSource: row.insight_source,
       artifactIds: {
@@ -849,7 +889,196 @@ export async function openWorkflowService(
         conceptScreens: row.concept_screen_artifact_id,
         prd: row.prd_artifact_id,
       },
-    }));
+      stages,
+    };
+  }
+
+  function readWorkflowSnapshot(
+    projectId: string,
+    snapshotId: string,
+  ): WorkflowSnapshot {
+    requireProject(projectId);
+    const row = database.prepare(`
+      SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
+             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+      FROM workflow_snapshots
+      WHERE id = ? AND project_id = ?
+    `).get(snapshotId, projectId) as unknown as WorkflowSnapshotRow | undefined;
+    if (!row) {
+      throw new WorkflowValidationError('Workflow Snapshot was not found.');
+    }
+    const designBrief = artifactById(projectId, row.design_brief_artifact_id);
+    const conceptScreenSet = artifactById(projectId, row.concept_screen_artifact_id);
+    const prd = artifactById(projectId, row.prd_artifact_id);
+    const designBriefRun = designBrief ? stageRun(designBrief.run_id) : undefined;
+    const conceptScreenRun = conceptScreenSet ? stageRun(conceptScreenSet.run_id) : undefined;
+    const prdRun = prd ? stageRun(prd.run_id) : undefined;
+    return {
+      ...snapshotSummary(row),
+      designBrief: artifactFromRow(designBrief),
+      designBriefRun: runFromRow(designBriefRun),
+      conceptScreenSet: conceptArtifactFromRows(
+        conceptScreenSet as ConceptArtifactRow | undefined,
+        conceptScreenRun ? conceptOperations(conceptScreenRun.id) : [],
+      ),
+      conceptScreenRun: conceptRunFromRows(
+        conceptScreenRun,
+        conceptScreenRun ? conceptOperations(conceptScreenRun.id) : [],
+      ),
+      prd: prdArtifactFromRow(prd),
+      prdRun: prdRunFromRow(prdRun),
+    };
+  }
+
+  function restoreWorkflowSnapshot(
+    projectId: string,
+    snapshotId: string,
+  ): ProjectWorkflow {
+    const project = requireProject(projectId);
+    const selected = database.prepare(`
+      SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
+             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+      FROM workflow_snapshots
+      WHERE id = ? AND project_id = ?
+    `).get(snapshotId, projectId) as unknown as WorkflowSnapshotRow | undefined;
+    if (!selected) {
+      throw new WorkflowValidationError('Workflow Snapshot was not found.');
+    }
+    if (candidateRow(projectId) || insightRevisionRow(projectId)) {
+      throw new WorkflowValidationError(
+        'Resolve the active Candidate Workflow or Insight Revision before restoring history.',
+      );
+    }
+    const currentDesignBrief = currentArtifact(projectId, 'design_brief');
+    const currentConceptScreens = currentArtifact(projectId, 'concept_screens');
+    const currentPrd = currentArtifact(projectId, 'prd');
+    const restoredAt = now().toISOString();
+    database.exec('BEGIN IMMEDIATE;');
+    try {
+      if (currentDesignBrief || currentConceptScreens || currentPrd) {
+        database.prepare(`
+          INSERT INTO workflow_snapshots (
+            id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
+            design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+          ) VALUES (?, ?, ?, 'restoration', 'design_brief', ?, ?, ?, ?)
+        `).run(
+          randomUUID(),
+          projectId,
+          restoredAt,
+          project.insight_source,
+          currentDesignBrief?.id ?? null,
+          currentConceptScreens?.id ?? null,
+          currentPrd?.id ?? null,
+        );
+      }
+      database.prepare('DELETE FROM current_artifacts WHERE project_id = ?').run(projectId);
+      const setCurrent = database.prepare(`
+        INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
+        VALUES (?, ?, ?)
+      `);
+      if (selected.design_brief_artifact_id) {
+        setCurrent.run(projectId, 'design_brief', selected.design_brief_artifact_id);
+      }
+      if (selected.concept_screen_artifact_id) {
+        setCurrent.run(projectId, 'concept_screens', selected.concept_screen_artifact_id);
+      }
+      if (selected.prd_artifact_id) {
+        setCurrent.run(projectId, 'prd', selected.prd_artifact_id);
+      }
+      database.prepare(`
+        UPDATE projects SET insight_source = ?, updated_at = ? WHERE id = ?
+      `).run(selected.insight_source, restoredAt, projectId);
+      database.exec('COMMIT;');
+    } catch (error) {
+      database.exec('ROLLBACK;');
+      throw error;
+    }
+    return readProjectWorkflow(projectId);
+  }
+
+  async function deleteWorkflowSnapshot(
+    projectId: string,
+    snapshotId: string,
+  ): Promise<ProjectWorkflow> {
+    requireProject(projectId);
+    const snapshot = database.prepare(`
+      SELECT id, project_id, created_at, preserved_by, replaced_from_stage, insight_source,
+             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
+      FROM workflow_snapshots
+      WHERE id = ? AND project_id = ?
+    `).get(snapshotId, projectId) as unknown as WorkflowSnapshotRow | undefined;
+    if (!snapshot) {
+      throw new WorkflowValidationError('Workflow Snapshot was not found.');
+    }
+    const artifactIds = [
+      snapshot.design_brief_artifact_id,
+      snapshot.concept_screen_artifact_id,
+      snapshot.prd_artifact_id,
+    ].filter((value): value is string => Boolean(value));
+    const assetPaths: string[] = [];
+    database.exec('BEGIN IMMEDIATE;');
+    try {
+      database.prepare('DELETE FROM workflow_snapshots WHERE id = ?').run(snapshotId);
+      for (const artifactId of new Set(artifactIds)) {
+        const reference = database.prepare(`
+          SELECT (
+            EXISTS(SELECT 1 FROM current_artifacts WHERE artifact_id = ?)
+            OR EXISTS(
+              SELECT 1 FROM workflow_snapshots
+              WHERE design_brief_artifact_id = ?
+                 OR concept_screen_artifact_id = ?
+                 OR prd_artifact_id = ?
+            )
+            OR EXISTS(
+              SELECT 1 FROM workflow_candidates
+              WHERE design_brief_artifact_id = ?
+                 OR concept_screen_artifact_id = ?
+                 OR prd_artifact_id = ?
+            )
+            OR EXISTS(SELECT 1 FROM pending_cascades WHERE design_brief_artifact_id = ?)
+          ) AS referenced
+        `).get(
+          artifactId,
+          artifactId, artifactId, artifactId,
+          artifactId, artifactId, artifactId,
+          artifactId,
+        ) as unknown as { referenced: number };
+        if (reference.referenced) continue;
+        const artifact = database.prepare(
+          'SELECT run_id FROM artifacts WHERE id = ? AND project_id = ?',
+        ).get(artifactId, projectId) as unknown as { run_id: string } | undefined;
+        if (!artifact) continue;
+        const assets = database.prepare(`
+          SELECT relative_path FROM binary_assets WHERE run_id = ?
+        `).all(artifact.run_id) as unknown as Array<{ relative_path: string }>;
+        database.prepare('DELETE FROM artifacts WHERE id = ?').run(artifactId);
+        const runReference = database.prepare(`
+          SELECT (
+            EXISTS(SELECT 1 FROM artifacts WHERE run_id = ?)
+            OR EXISTS(
+              SELECT 1 FROM workflow_candidates
+              WHERE design_brief_run_id = ?
+                 OR concept_screen_run_id = ?
+                 OR prd_run_id = ?
+            )
+          ) AS referenced
+        `).get(
+          artifact.run_id,
+          artifact.run_id, artifact.run_id, artifact.run_id,
+        ) as unknown as { referenced: number };
+        if (!runReference.referenced) {
+          database.prepare('DELETE FROM stage_runs WHERE id = ?').run(artifact.run_id);
+          assetPaths.push(...assets.map(({ relative_path }) => relative_path));
+        }
+      }
+      database.exec('COMMIT;');
+    } catch (error) {
+      database.exec('ROLLBACK;');
+      throw error;
+    }
+    await Promise.all(assetPaths.map((relativePath) =>
+      unlink(join(dataDirectory, relativePath)).catch(() => undefined)));
+    return readProjectWorkflow(projectId);
   }
 
   function emitCandidateProgress(
@@ -1254,6 +1483,18 @@ export async function openWorkflowService(
   const service: WorkflowService = {
     getProjectWorkflow(projectId) {
       return readProjectWorkflow(projectId);
+    },
+
+    getWorkflowSnapshot(projectId, snapshotId) {
+      return readWorkflowSnapshot(projectId, snapshotId);
+    },
+
+    restoreWorkflowSnapshot(projectId, snapshotId) {
+      return restoreWorkflowSnapshot(projectId, snapshotId);
+    },
+
+    async deleteWorkflowSnapshot(projectId, snapshotId) {
+      return deleteWorkflowSnapshot(projectId, snapshotId);
     },
 
     async generateDesignBrief(projectId, candidateId) {
