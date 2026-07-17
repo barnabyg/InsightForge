@@ -680,7 +680,7 @@ export function ProjectWorkspace({
                 >
                   {workflow.generating
                     ? 'Generating…'
-                    : hasCurrentArtifact('design_brief')
+                    : rerunPlan || hasCurrentArtifact('design_brief')
                       ? completeWorkflowActionLabel('design_brief')
                       : 'Generate Design Brief'}
                 </button>
@@ -768,7 +768,7 @@ export function ProjectWorkspace({
                     ) || (hasCurrentArtifact('concept_screens') && !rerunPlan)}
                     onClick={() => requestRegeneration('concept_screens')}
                   >
-                    {hasCurrentArtifact('concept_screens')
+                    {rerunPlan || hasCurrentArtifact('concept_screens')
                       ? completeWorkflowActionLabel('concept_screens')
                       : workflow.workflow?.lastConceptScreenRun
                       && workflow.workflow.lastConceptScreenRun.status !== 'succeeded'
@@ -857,7 +857,7 @@ export function ProjectWorkspace({
                 >
                   {workflow.generatingStage === 'prd'
                     ? 'Generating…'
-                    : hasCurrentArtifact('prd')
+                    : rerunPlan || hasCurrentArtifact('prd')
                       ? completeWorkflowActionLabel('prd')
                       : 'Generate PRD'}
                 </button>
