@@ -219,7 +219,7 @@ export interface CandidateWorkflow {
   id: string;
   projectId: string;
   status: 'running' | 'paused' | 'failed' | 'cancelled'
-    | 'awaiting_promotion' | 'awaiting_warning_review' | 'warnings_rejected';
+    | 'awaiting_promotion' | 'awaiting_warning_review' | 'kept_after_warning_review';
   currentStage: GeneratedStageId | 'promotion';
   completedOperationCount: number;
   totalOperationCount: 5;

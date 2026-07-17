@@ -143,7 +143,7 @@ export async function initializeStorage(
         status TEXT NOT NULL CHECK (
           status IN (
             'running', 'paused', 'failed', 'cancelled',
-            'awaiting_promotion', 'awaiting_warning_review', 'warnings_rejected'
+            'awaiting_promotion', 'awaiting_warning_review', 'kept_after_warning_review'
           )
         ),
         current_stage TEXT NOT NULL CHECK (

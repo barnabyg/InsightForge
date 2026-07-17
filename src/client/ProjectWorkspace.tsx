@@ -360,7 +360,7 @@ export function ProjectWorkspace({
                   <strong>
                     {candidate.status === 'awaiting_warning_review'
                       ? 'Candidate ready for warning review'
-                      : candidate.status === 'warnings_rejected'
+                      : candidate.status === 'kept_after_warning_review'
                         ? 'Candidate kept for later'
                       : candidate.status === 'awaiting_promotion'
                         ? 'Candidate ready for promotion'
@@ -390,7 +390,7 @@ export function ProjectWorkspace({
                     }}>Cancel after current operation</button>
                   ) : candidate.status === 'awaiting_warning_review'
                     || candidate.status === 'awaiting_promotion'
-                    || candidate.status === 'warnings_rejected' ? (
+                    || candidate.status === 'kept_after_warning_review' ? (
                     <button className={styles['primary-action']} type="button" onClick={() => {
                       void workflow.promoteFullWorkflow().catch(() => undefined);
                     }}>Promote Candidate Workflow</button>
@@ -401,7 +401,7 @@ export function ProjectWorkspace({
                   )}
                   {candidate.status === 'awaiting_warning_review' && (
                     <button className={styles['secondary-action']} type="button" onClick={() => {
-                      void workflow.rejectFullWorkflowWarnings().catch(() => undefined);
+                      void workflow.keepCandidateAfterWarningReview().catch(() => undefined);
                     }}>Keep Candidate Workflow</button>
                   )}
                   {candidate.status !== 'running' && (

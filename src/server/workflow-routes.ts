@@ -190,10 +190,10 @@ export function registerWorkflowRoutes(
   );
 
   app.post<{ Params: ProjectParameters }>(
-    '/api/projects/:id/full-generations/warnings/rejection',
+    '/api/projects/:id/full-generations/warning-review/keep',
     async (request, reply) => {
       try {
-        return workflows.rejectFullWorkflowWarnings(request.params.id);
+        return workflows.keepCandidateAfterWarningReview(request.params.id);
       } catch (error) {
         return handleWorkflowError(error, reply);
       }

@@ -150,7 +150,7 @@ export interface WorkflowService {
   generateFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
   resumeFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
   promoteFullWorkflow(projectId: string): ProjectWorkflow;
-  rejectFullWorkflowWarnings(projectId: string): ProjectWorkflow;
+  keepCandidateAfterWarningReview(projectId: string): ProjectWorkflow;
   discardFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
   cancelFullWorkflow(projectId: string): boolean;
   cancelConceptScreens(projectId: string): boolean;
@@ -922,7 +922,7 @@ export async function openWorkflowService(
             ? 'Review the Candidate Workflow warnings before promotion.'
             : candidate.status === 'awaiting_promotion'
               ? 'The Candidate Workflow is ready for promotion.'
-              : candidate.status === 'warnings_rejected'
+              : candidate.status === 'kept_after_warning_review'
                 ? 'The warning-bearing Candidate Workflow is being kept for later.'
               : 'Resume or discard the existing Candidate Workflow first.'
           : hasWorkflow
@@ -2170,7 +2170,7 @@ export async function openWorkflowService(
       if (
         candidate.status !== 'awaiting_promotion'
         && candidate.status !== 'awaiting_warning_review'
-        && candidate.status !== 'warnings_rejected'
+        && candidate.status !== 'kept_after_warning_review'
       ) {
         throw new WorkflowValidationError(
           'The Candidate Workflow is not ready for promotion.',
@@ -2179,7 +2179,7 @@ export async function openWorkflowService(
       return promoteCandidate(candidate);
     },
 
-    rejectFullWorkflowWarnings(projectId) {
+    keepCandidateAfterWarningReview(projectId) {
       requireProject(projectId);
       const candidate = requireCandidate(projectId);
       if (candidate.status !== 'awaiting_warning_review') {
@@ -2188,7 +2188,7 @@ export async function openWorkflowService(
         );
       }
       updateCandidate(candidate.id, {
-        status: 'warnings_rejected',
+        status: 'kept_after_warning_review',
         error: null,
       });
       return readProjectWorkflow(projectId);

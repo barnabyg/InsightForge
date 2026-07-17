@@ -1273,13 +1273,13 @@ describe('Workflow service', () => {
       },
     });
 
-    const kept = workflows.rejectFullWorkflowWarnings(project.id);
+    const kept = workflows.keepCandidateAfterWarningReview(project.id);
     expect(kept).toMatchObject({
       designBrief: null,
       conceptScreenSet: null,
       prd: null,
       candidate: {
-        status: 'warnings_rejected',
+        status: 'kept_after_warning_review',
         warnings: [
           { stageId: 'design_brief', code: 'below_recommended_word_count' },
           { stageId: 'prd', code: 'below_recommended_word_count' },
