@@ -37,6 +37,27 @@ describe('Workflow service', () => {
     return PNG.sync.write(image);
   }
 
+  function modifyProjectExport<T>(
+    archive: Buffer,
+    modify: (payload: T) => void,
+  ): Buffer {
+    const files = unzipSync(archive);
+    const payload = JSON.parse(strFromU8(files['project.json'])) as T;
+    modify(payload);
+    files['project.json'] = strToU8(`${JSON.stringify(payload)}\n`);
+    const manifest = JSON.parse(strFromU8(files['manifest.json'])) as {
+      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
+    };
+    const projectIntegrity = manifest.integrity.files
+      .find(({ path }) => path === 'project.json')!;
+    projectIntegrity.byteSize = files['project.json'].byteLength;
+    projectIntegrity.sha256 = createHash('sha256')
+      .update(files['project.json'])
+      .digest('hex');
+    files['manifest.json'] = strToU8(`${JSON.stringify(manifest)}\n`);
+    return Buffer.from(zipSync(files));
+  }
+
   function prdNotExpected() {
     return {
       async generatePrd(): Promise<never> {
@@ -2609,82 +2630,35 @@ describe('Workflow service', () => {
     expect(archiveText).not.toContain(dataDirectory);
     expect(projectText).not.toContain('relative_path');
 
-    const incoherentFiles = unzipSync(exported.bytes);
-    const incoherentPayload = JSON.parse(strFromU8(incoherentFiles['project.json'])) as {
+    const incoherentExport = modifyProjectExport<{
       currentWorkflow: { artifactIds: { designBrief: string } };
       workflowSnapshots: Array<{ artifactIds: { designBrief: string } }>;
-    };
-    incoherentPayload.currentWorkflow.artifactIds.designBrief =
-      incoherentPayload.workflowSnapshots[0]!.artifactIds.designBrief;
-    incoherentFiles['project.json'] = strToU8(`${JSON.stringify(incoherentPayload)}\n`);
-    const incoherentManifest = JSON.parse(strFromU8(incoherentFiles['manifest.json'])) as {
-      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
-    };
-    const incoherentProjectIntegrity = incoherentManifest.integrity.files
-      .find(({ path }) => path === 'project.json')!;
-    incoherentProjectIntegrity.byteSize = incoherentFiles['project.json'].byteLength;
-    incoherentProjectIntegrity.sha256 = createHash('sha256')
-      .update(incoherentFiles['project.json'])
-      .digest('hex');
-    incoherentFiles['manifest.json'] = strToU8(`${JSON.stringify(incoherentManifest)}\n`);
-    expect(() => workflows.importProject(Buffer.from(zipSync(incoherentFiles))))
+    }>(exported.bytes, (payload) => {
+      payload.currentWorkflow.artifactIds.designBrief =
+        payload.workflowSnapshots[0]!.artifactIds.designBrief;
+    });
+    expect(() => workflows.importProject(incoherentExport))
       .toThrow('currentWorkflow Concept Screens do not consume its Design Brief');
     expect(projects.listProjects()).toHaveLength(1);
 
-    const brokenCandidateFiles = unzipSync(exported.bytes);
-    const brokenCandidatePayload = JSON.parse(
-      strFromU8(brokenCandidateFiles['project.json']),
-    ) as {
+    const brokenCandidateExport = modifyProjectExport<{
       currentWorkflow: { artifactIds: { prd: string } };
       candidates: Array<{ designBriefArtifactId: string }>;
-    };
-    brokenCandidatePayload.candidates[0]!.designBriefArtifactId =
-      brokenCandidatePayload.currentWorkflow.artifactIds.prd;
-    brokenCandidateFiles['project.json'] = strToU8(
-      `${JSON.stringify(brokenCandidatePayload)}\n`,
-    );
-    const brokenCandidateManifest = JSON.parse(
-      strFromU8(brokenCandidateFiles['manifest.json']),
-    ) as {
-      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
-    };
-    const brokenCandidateIntegrity = brokenCandidateManifest.integrity.files
-      .find(({ path }) => path === 'project.json')!;
-    brokenCandidateIntegrity.byteSize = brokenCandidateFiles['project.json'].byteLength;
-    brokenCandidateIntegrity.sha256 = createHash('sha256')
-      .update(brokenCandidateFiles['project.json'])
-      .digest('hex');
-    brokenCandidateFiles['manifest.json'] = strToU8(
-      `${JSON.stringify(brokenCandidateManifest)}\n`,
-    );
-    expect(() => workflows.importProject(Buffer.from(zipSync(brokenCandidateFiles))))
+    }>(exported.bytes, (payload) => {
+      payload.candidates[0]!.designBriefArtifactId =
+        payload.currentWorkflow.artifactIds.prd;
+    });
+    expect(() => workflows.importProject(brokenCandidateExport))
       .toThrow('Design Brief does not reference a matching Artifact and Stage Run');
     expect(projects.listProjects()).toHaveLength(1);
 
-    const changedCandidateFiles = unzipSync(exported.bytes);
-    const changedCandidatePayload = JSON.parse(
-      strFromU8(changedCandidateFiles['project.json']),
-    ) as { candidates: Array<{ insightSource: string }> };
-    changedCandidatePayload.candidates[0]!.insightSource =
-      'A different Insight Source introduced after export.';
-    changedCandidateFiles['project.json'] = strToU8(
-      `${JSON.stringify(changedCandidatePayload)}\n`,
-    );
-    const changedCandidateManifest = JSON.parse(
-      strFromU8(changedCandidateFiles['manifest.json']),
-    ) as {
-      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
-    };
-    const changedCandidateIntegrity = changedCandidateManifest.integrity.files
-      .find(({ path }) => path === 'project.json')!;
-    changedCandidateIntegrity.byteSize = changedCandidateFiles['project.json'].byteLength;
-    changedCandidateIntegrity.sha256 = createHash('sha256')
-      .update(changedCandidateFiles['project.json'])
-      .digest('hex');
-    changedCandidateFiles['manifest.json'] = strToU8(
-      `${JSON.stringify(changedCandidateManifest)}\n`,
-    );
-    expect(() => workflows.importProject(Buffer.from(zipSync(changedCandidateFiles))))
+    const changedCandidateExport = modifyProjectExport<{
+      candidates: Array<{ insightSource: string }>;
+    }>(exported.bytes, (payload) => {
+      payload.candidates[0]!.insightSource =
+        'A different Insight Source introduced after export.';
+    });
+    expect(() => workflows.importProject(changedCandidateExport))
       .toThrow('Insight Source does not match its Project');
     expect(projects.listProjects()).toHaveLength(1);
 
@@ -2812,23 +2786,13 @@ describe('Workflow service', () => {
       .toThrow('project.json failed its integrity check');
     expect(projects.listProjects()).toHaveLength(1);
 
-    const brokenFiles = unzipSync(exported.bytes);
-    const brokenPayload = JSON.parse(strFromU8(brokenFiles['project.json'])) as {
+    const brokenExport = modifyProjectExport<{
       currentWorkflow: { artifactIds: { designBrief?: string } };
-    };
-    brokenPayload.currentWorkflow.artifactIds.designBrief = 'missing-artifact';
-    brokenFiles['project.json'] = strToU8(`${JSON.stringify(brokenPayload)}\n`);
-    const manifest = JSON.parse(strFromU8(brokenFiles['manifest.json'])) as {
-      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
-    };
-    const projectIntegrity = manifest.integrity.files.find(({ path }) => path === 'project.json')!;
-    projectIntegrity.byteSize = brokenFiles['project.json'].byteLength;
-    projectIntegrity.sha256 = createHash('sha256')
-      .update(brokenFiles['project.json'])
-      .digest('hex');
-    brokenFiles['manifest.json'] = strToU8(`${JSON.stringify(manifest)}\n`);
+    }>(exported.bytes, (payload) => {
+      payload.currentWorkflow.artifactIds.designBrief = 'missing-artifact';
+    });
 
-    expect(() => workflows.importProject(Buffer.from(zipSync(brokenFiles))))
+    expect(() => workflows.importProject(brokenExport))
       .toThrow('does not reference a matching Artifact');
     expect(projects.listProjects()).toHaveLength(1);
   });
