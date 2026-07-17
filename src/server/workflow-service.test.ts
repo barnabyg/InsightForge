@@ -2631,6 +2631,36 @@ describe('Workflow service', () => {
       .toThrow('currentWorkflow Concept Screens do not consume its Design Brief');
     expect(projects.listProjects()).toHaveLength(1);
 
+    const brokenCandidateFiles = unzipSync(exported.bytes);
+    const brokenCandidatePayload = JSON.parse(
+      strFromU8(brokenCandidateFiles['project.json']),
+    ) as {
+      currentWorkflow: { artifactIds: { prd: string } };
+      candidates: Array<{ designBriefArtifactId: string }>;
+    };
+    brokenCandidatePayload.candidates[0]!.designBriefArtifactId =
+      brokenCandidatePayload.currentWorkflow.artifactIds.prd;
+    brokenCandidateFiles['project.json'] = strToU8(
+      `${JSON.stringify(brokenCandidatePayload)}\n`,
+    );
+    const brokenCandidateManifest = JSON.parse(
+      strFromU8(brokenCandidateFiles['manifest.json']),
+    ) as {
+      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
+    };
+    const brokenCandidateIntegrity = brokenCandidateManifest.integrity.files
+      .find(({ path }) => path === 'project.json')!;
+    brokenCandidateIntegrity.byteSize = brokenCandidateFiles['project.json'].byteLength;
+    brokenCandidateIntegrity.sha256 = createHash('sha256')
+      .update(brokenCandidateFiles['project.json'])
+      .digest('hex');
+    brokenCandidateFiles['manifest.json'] = strToU8(
+      `${JSON.stringify(brokenCandidateManifest)}\n`,
+    );
+    expect(() => workflows.importProject(Buffer.from(zipSync(brokenCandidateFiles))))
+      .toThrow('Design Brief does not reference a matching Artifact and Stage Run');
+    expect(projects.listProjects()).toHaveLength(1);
+
     const sourceWorkflow = workflows.getProjectWorkflow(project.id);
     const imported = workflows.importProject(exported.bytes);
     const importedWorkflow = workflows.getProjectWorkflow(imported.id);

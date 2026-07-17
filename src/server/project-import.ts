@@ -60,7 +60,7 @@ interface ProjectExportEnvelope {
     projectId: string;
     runKind: RunKind;
     status: string;
-    currentStage: string;
+    currentStage: StageId | 'promotion';
     completedOperationCount: number;
     startStage: StageId;
     insightSource: string;
@@ -695,6 +695,88 @@ function validateReferences(payload: ProjectExportEnvelope, files: Record<string
       );
     }
   };
+  const validateCandidatePair = (
+    runId: string | null,
+    artifactId: string | null,
+    stageId: StageId,
+    label: string,
+  ) => {
+    const run = runId ? runs.get(runId) : undefined;
+    const artifact = artifactId ? artifacts.get(artifactId) : undefined;
+    if (runId && (!run || run.stageId !== stageId)) {
+      invalidStructure(`${label} Run does not reference the expected stage.`);
+    }
+    if (
+      artifactId
+      && (!artifact || artifact.stageId !== stageId || !run || artifact.runId !== run.id)
+    ) {
+      invalidStructure(`${label} does not reference a matching Artifact and Stage Run.`);
+    }
+  };
+  for (const candidate of payload.candidates) {
+    const label = `Candidate Workflow ${candidate.id}`;
+    validateCandidatePair(
+      candidate.designBriefRunId,
+      candidate.designBriefArtifactId,
+      'design_brief',
+      `${label} Design Brief`,
+    );
+    validateCandidatePair(
+      candidate.conceptScreenRunId,
+      candidate.conceptScreenArtifactId,
+      'concept_screens',
+      `${label} Concept Screens`,
+    );
+    validateCandidatePair(
+      candidate.prdRunId,
+      candidate.prdArtifactId,
+      'prd',
+      `${label} PRD`,
+    );
+    const candidateArtifacts: ArtifactIds = {
+      ...(candidate.designBriefArtifactId
+        ? { designBrief: candidate.designBriefArtifactId }
+        : {}),
+      ...(candidate.conceptScreenArtifactId
+        ? { conceptScreens: candidate.conceptScreenArtifactId }
+        : {}),
+      ...(candidate.prdArtifactId ? { prd: candidate.prdArtifactId } : {}),
+    };
+    validateCoherentWorkflow(candidateArtifacts, candidate.insightSource, label);
+    if (candidate.currentStage !== 'design_brief' && !candidate.designBriefArtifactId) {
+      invalidStructure(`${label} is missing the Design Brief needed to resume.`);
+    }
+    if (
+      (candidate.currentStage === 'prd' || candidate.currentStage === 'promotion')
+      && !candidate.conceptScreenArtifactId
+    ) {
+      invalidStructure(`${label} is missing the Concept Screen Set needed to resume.`);
+    }
+    if (candidate.currentStage === 'promotion' && !candidate.prdArtifactId) {
+      invalidStructure(`${label} is missing the PRD needed for promotion.`);
+    }
+    const completedRange = {
+      design_brief: [0, 0],
+      concept_screens: [1, 4],
+      prd: [4, 5],
+      promotion: [5, 5],
+    } as const;
+    const [minimumCompleted, maximumCompleted] = completedRange[candidate.currentStage];
+    if (
+      !Number.isInteger(candidate.completedOperationCount)
+      || candidate.completedOperationCount < minimumCompleted
+      || candidate.completedOperationCount > maximumCompleted
+    ) {
+      invalidStructure(`${label} completed operation count does not match its current stage.`);
+    }
+  }
+  for (const pending of payload.pendingCascades) {
+    requireSucceededArtifact(
+      pending.designBriefArtifactId,
+      'design_brief',
+      'Pending cascade Design Brief',
+    );
+  }
   validateCoherentWorkflow(
     payload.currentWorkflow.artifactIds,
     payload.project.insightSource,
