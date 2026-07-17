@@ -40,7 +40,10 @@ import type { ImageQuality, StageId } from '../shared/workflow-configuration.js'
 import { applicationMetadata } from './app-metadata.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
-import { importProjectExport } from './project-import.js';
+import {
+  importProjectExport,
+  type ProjectImportLimits,
+} from './project-import.js';
 import { initializeStorage } from './storage.js';
 import {
   buildPrdStageInput,
@@ -55,6 +58,7 @@ interface WorkflowServiceOptions {
   generateImportId?: () => string;
   imageGeneration?: ImageGenerationBoundary;
   now?: () => Date;
+  projectImportLimits?: ProjectImportLimits;
   textGeneration: TextGenerationBoundary;
 }
 
@@ -2032,6 +2036,7 @@ export async function openWorkflowService(
         archive,
         now(),
         options.generateImportId,
+        options.projectImportLimits,
       );
     },
 

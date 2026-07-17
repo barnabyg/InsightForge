@@ -160,6 +160,25 @@ export class ProjectImportError extends Error {
   }
 }
 
+export interface ProjectImportLimits {
+  maxArchiveBytes: number;
+  maxExpandedBytes: number;
+  maxEntries: number;
+}
+
+export const defaultProjectImportLimits: ProjectImportLimits = {
+  maxArchiveBytes: 256 * 1024 * 1024,
+  maxExpandedBytes: 512 * 1024 * 1024,
+  maxEntries: 10_000,
+};
+
+function supportedLimitError(limit: number, kind: 'archive' | 'expanded'): ProjectImportError {
+  return new ProjectImportError(
+    'project_import_archive_too_large',
+    `Project Export exceeds the supported ${limit} byte ${kind} limit.`,
+  );
+}
+
 function invalidStructure(message: string): never {
   throw new ProjectImportError('project_import_structure_invalid', message);
 }
@@ -894,11 +913,33 @@ export function importProjectExport(
   archive: Buffer,
   importedAt: Date,
   generateId: () => string = randomUUID,
+  limits: ProjectImportLimits = defaultProjectImportLimits,
 ): Project {
+  if (archive.byteLength > limits.maxArchiveBytes) {
+    throw supportedLimitError(limits.maxArchiveBytes, 'archive');
+  }
   let files: Record<string, Uint8Array>;
   try {
-    files = unzipSync(archive);
-  } catch {
+    let entryCount = 0;
+    let expandedBytes = 0;
+    files = unzipSync(archive, {
+      filter(file) {
+        entryCount += 1;
+        expandedBytes += file.originalSize;
+        if (entryCount > limits.maxEntries) {
+          throw new ProjectImportError(
+            'project_import_archive_too_large',
+            `Project Export exceeds the supported ${limits.maxEntries} file limit.`,
+          );
+        }
+        if (expandedBytes > limits.maxExpandedBytes) {
+          throw supportedLimitError(limits.maxExpandedBytes, 'expanded');
+        }
+        return true;
+      },
+    });
+  } catch (error) {
+    if (error instanceof ProjectImportError) throw error;
     throw new ProjectImportError(
       'project_import_archive_invalid',
       'The selected file is not a readable Project Export archive.',

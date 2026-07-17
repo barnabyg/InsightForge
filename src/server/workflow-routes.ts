@@ -1,6 +1,10 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { WorkflowRerunRequest } from '../shared/generation.js';
-import { ProjectImportError } from './project-import.js';
+import {
+  defaultProjectImportLimits,
+  ProjectImportError,
+  type ProjectImportLimits,
+} from './project-import.js';
 import {
   WorkflowGenerationError,
   WorkflowProjectNotFoundError,
@@ -22,6 +26,7 @@ interface InsightRevisionPatch {
 
 export interface WorkflowRouteOptions {
   beforeGeneration?: () => Promise<void>;
+  projectImportLimits?: ProjectImportLimits;
 }
 
 function handleWorkflowError(error: unknown, reply: FastifyReply) {
@@ -48,21 +53,50 @@ function handleWorkflowError(error: unknown, reply: FastifyReply) {
   throw error;
 }
 
+function supportedArchiveLimitError(limit: number): ProjectImportError {
+  return new ProjectImportError(
+    'project_import_archive_too_large',
+    `Project Export exceeds the supported ${limit} byte archive limit.`,
+  );
+}
+
 export function registerWorkflowRoutes(
   app: FastifyInstance,
   workflows: WorkflowService,
   options: WorkflowRouteOptions = {},
 ): void {
+  const importLimits = options.projectImportLimits ?? defaultProjectImportLimits;
   app.addContentTypeParser(
     'application/zip',
-    { parseAs: 'buffer', bodyLimit: Number.MAX_SAFE_INTEGER },
-    (_request, body, done) => done(null, body),
+    { bodyLimit: Number.MAX_SAFE_INTEGER },
+    (_request, stream, done) => {
+      const chunks: Buffer[] = [];
+      let byteSize = 0;
+      let oversized = false;
+      stream.on('data', (chunk: Buffer) => {
+        byteSize += chunk.byteLength;
+        if (byteSize > importLimits.maxArchiveBytes) {
+          oversized = true;
+          chunks.length = 0;
+        } else if (!oversized) {
+          chunks.push(chunk);
+        }
+      });
+      stream.once('error', () => done(null, new ProjectImportError(
+        'project_import_archive_invalid',
+        'The selected file could not be read as a Project Export archive.',
+      )));
+      stream.once('end', () => done(null, oversized
+        ? supportedArchiveLimitError(importLimits.maxArchiveBytes)
+        : Buffer.concat(chunks, byteSize)));
+    },
   );
 
-  app.post<{ Body: Buffer }>(
+  app.post<{ Body: Buffer | ProjectImportError }>(
     '/api/project-imports',
     async (request, reply) => {
       try {
+        if (request.body instanceof ProjectImportError) throw request.body;
         return reply.status(201).send(workflows.importProject(request.body));
       } catch (error) {
         return handleWorkflowError(error, reply);
