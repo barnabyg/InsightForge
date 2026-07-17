@@ -10,6 +10,12 @@ type StageId = 'design_brief' | 'concept_screens' | 'prd';
 type StageKey = 'designBrief' | 'conceptScreens' | 'prd';
 type RunKind = 'initial' | 'regeneration' | 'variation';
 
+const stageIdByKey: Record<StageKey, StageId> = {
+  designBrief: 'design_brief',
+  conceptScreens: 'concept_screens',
+  prd: 'prd',
+};
+
 interface ExportError {
   code: string;
   message: string;
@@ -551,13 +557,10 @@ function validateReferences(payload: ProjectExportEnvelope, files: Record<string
       invalidStructure(`Artifact ${artifact.id} does not reference a matching Stage Run.`);
     }
   }
-  const stageByKey: Record<StageKey, StageId> = {
-    designBrief: 'design_brief', conceptScreens: 'concept_screens', prd: 'prd',
-  };
   const validateArtifactSet = (ids: ArtifactIds, label: string) => {
     for (const [key, id] of Object.entries(ids) as Array<[StageKey, string]>) {
       const artifact = artifacts.get(id);
-      if (!artifact || artifact.stageId !== stageByKey[key]) {
+      if (!artifact || artifact.stageId !== stageIdByKey[key]) {
         invalidStructure(`${label}.${key} does not reference a matching Artifact.`);
       }
     }
@@ -913,16 +916,13 @@ export function importProjectExport(
         operation.error?.message ?? null,
       );
     }
-    const stageByKey: Record<StageKey, StageId> = {
-      designBrief: 'design_brief', conceptScreens: 'concept_screens', prd: 'prd',
-    };
     const insertCurrent = database.prepare(`
       INSERT INTO current_artifacts (project_id, stage_id, artifact_id) VALUES (?, ?, ?)
     `);
     for (const [key, oldArtifactId] of Object.entries(
       payload.currentWorkflow.artifactIds,
     ) as Array<[StageKey, string]>) {
-      insertCurrent.run(projectId, stageByKey[key], artifactIds.get(oldArtifactId)!);
+      insertCurrent.run(projectId, stageIdByKey[key], artifactIds.get(oldArtifactId)!);
     }
     const insertSnapshot = database.prepare(`
       INSERT INTO workflow_snapshots (
