@@ -4,6 +4,7 @@ import type {
   FullGenerationProgressEvent,
   GeneratedStageId,
   ProjectWorkflow,
+  WorkflowRerunRequest,
 } from '../shared/generation.js';
 
 async function requestWorkflow(url: string, init?: RequestInit): Promise<ProjectWorkflow> {
@@ -206,7 +207,9 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
         `/api/projects/${projectId}/workflow-reruns`,
         {
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ stageId: startStage }),
+          body: JSON.stringify({
+            stageId: startStage,
+          } satisfies WorkflowRerunRequest),
         },
       );
     },

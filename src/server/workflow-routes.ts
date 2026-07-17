@@ -1,5 +1,5 @@
 import type { FastifyInstance, FastifyReply } from 'fastify';
-import type { GeneratedStageId } from '../shared/generation.js';
+import type { WorkflowRerunRequest } from '../shared/generation.js';
 import {
   WorkflowGenerationError,
   WorkflowProjectNotFoundError,
@@ -9,10 +9,6 @@ import {
 
 interface ProjectParameters {
   id: string;
-}
-
-interface WorkflowRerunBody {
-  stageId: GeneratedStageId;
 }
 
 export interface WorkflowRouteOptions {
@@ -171,7 +167,7 @@ export function registerWorkflowRoutes(
     },
   );
 
-  app.post<{ Params: ProjectParameters; Body: WorkflowRerunBody }>(
+  app.post<{ Params: ProjectParameters; Body: WorkflowRerunRequest }>(
     '/api/projects/:id/workflow-reruns',
     async (request, reply) => {
       try {

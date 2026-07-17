@@ -172,6 +172,10 @@ export interface WorkflowSnapshotSummary {
   };
 }
 
+export interface WorkflowRerunRequest {
+  stageId: GeneratedStageId;
+}
+
 export interface FullGenerationProgressEvent {
   projectId: string;
   candidateId: string;
