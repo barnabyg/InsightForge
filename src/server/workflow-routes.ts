@@ -1,9 +1,12 @@
-import { createWriteStream, mkdtempSync, rmSync } from 'node:fs';
+import { createWriteStream, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { WorkflowRerunRequest } from '../shared/generation.js';
-import { ProjectImportError } from './project-import.js';
+import {
+  cleanupProjectImportDirectory,
+  ProjectImportError,
+} from './project-import.js';
 import {
   WorkflowGenerationError,
   WorkflowProjectNotFoundError,
@@ -83,7 +86,7 @@ export function registerWorkflowRoutes(
       const fail = (error?: unknown) => {
         if (settled) return;
         settled = true;
-        const cleanup = () => rmSync(directory, { recursive: true, force: true });
+        const cleanup = () => cleanupProjectImportDirectory(directory);
         if (output.closed) cleanup();
         else output.once('close', cleanup);
         output.destroy();
@@ -95,7 +98,7 @@ export function registerWorkflowRoutes(
         ));
       };
       output.once('error', fail);
-      output.once('finish', () => {
+      output.once('close', () => {
         if (settled) return;
         settled = true;
         done(null, { archivePath, directory } satisfies ProjectImportUpload);
@@ -116,7 +119,7 @@ export function registerWorkflowRoutes(
             workflows.importProjectFile(request.body.archivePath),
           );
         } finally {
-          rmSync(request.body.directory, { recursive: true, force: true });
+          cleanupProjectImportDirectory(request.body.directory);
         }
       } catch (error) {
         return handleWorkflowError(error, reply);

@@ -181,6 +181,14 @@ export class ProjectImportError extends Error {
   }
 }
 
+export function cleanupProjectImportDirectory(directory: string): void {
+  try {
+    rmSync(directory, { recursive: true, force: true });
+  } catch {
+    // Temporary import files can be recovered later and must not mask the import result.
+  }
+}
+
 function invalidStructure(message: string): never {
   throw new ProjectImportError('project_import_structure_invalid', message);
 }
@@ -284,7 +292,7 @@ function extractProjectArchive(
       },
     };
   } catch (error) {
-    rmSync(directory, { recursive: true, force: true });
+    cleanupProjectImportDirectory(directory);
     if (error instanceof ProjectImportError) throw error;
     throw new ProjectImportError(
       'project_import_archive_invalid',
@@ -1204,7 +1212,7 @@ function importExtractedProject(
         // The original import failure remains the actionable error.
       }
     }
-    rmSync(assetsMoved ? finalDirectory : stagingDirectory, { recursive: true, force: true });
+    cleanupProjectImportDirectory(assetsMoved ? finalDirectory : stagingDirectory);
     if (error instanceof ProjectImportError) throw error;
     throw new ProjectImportError(
       'project_import_persistence_failed',
@@ -1239,7 +1247,7 @@ export function importProjectExport(
       generateId,
     );
   } finally {
-    rmSync(extracted.directory, { recursive: true, force: true });
+    cleanupProjectImportDirectory(extracted.directory);
   }
 }
 
@@ -1260,6 +1268,6 @@ export function importProjectExportFile(
       generateId,
     );
   } finally {
-    rmSync(extracted.directory, { recursive: true, force: true });
+    cleanupProjectImportDirectory(extracted.directory);
   }
 }
