@@ -2662,6 +2662,28 @@ describe('Workflow service', () => {
       .toThrow('Insight Source does not match its Project');
     expect(projects.listProjects()).toHaveLength(1);
 
+    const interruptedExport = modifyProjectExport<{
+      candidates: Array<{ status: string; error: unknown }>;
+    }>(exported.bytes, (payload) => {
+      payload.candidates[0]!.status = 'running';
+      payload.candidates[0]!.error = null;
+    });
+    const interruptedImport = workflows.importProject(interruptedExport);
+    expect(workflows.getProjectWorkflow(interruptedImport.id).candidate).toMatchObject({
+      status: 'failed',
+      error: {
+        code: 'generation_interrupted',
+        message: 'Full Generation was interrupted and can be resumed.',
+      },
+    });
+    const resumedInterruptedImport = await workflows.resumeFullWorkflow(
+      interruptedImport.id,
+    );
+    expect(resumedInterruptedImport.candidate).toMatchObject({
+      status: 'paused',
+      currentStage: 'prd',
+    });
+
     const sourceWorkflow = workflows.getProjectWorkflow(project.id);
     const imported = workflows.importProject(exported.bytes);
     const importedWorkflow = workflows.getProjectWorkflow(imported.id);

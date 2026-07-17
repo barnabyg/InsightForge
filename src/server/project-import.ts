@@ -1076,16 +1076,22 @@ function importExtractedProject(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const run of payload.stageRuns) {
+      const interrupted = run.status === 'running';
       insertRun.run(
-        runIds.get(run.id)!, projectId, run.stageId, run.runKind, run.status,
-        run.startedAt, run.completedAt, run.durationMs, run.prompt, run.model,
+        runIds.get(run.id)!, projectId, run.stageId, run.runKind,
+        interrupted ? 'failed' : run.status,
+        run.startedAt, interrupted ? timestamp : run.completedAt,
+        run.durationMs, run.prompt, run.model,
         run.stageConfigurationUpdatedAt, run.input,
         remapNullable(artifactIds, run.inputArtifactId),
         remapNullable(runIds, run.inputRunId),
         json(remapJsonIds(run.inputLineage, remapMaps)), run.assembledRequest,
         json(run.settings), json(remapJsonIds(run.attemptHistory, remapMaps)),
         run.responseId, run.requestId, json(run.usage), json(run.validation),
-        run.error?.code ?? null, run.error?.message ?? null,
+        interrupted ? 'generation_interrupted' : (run.error?.code ?? null),
+        interrupted
+          ? 'Generation was interrupted before this Stage Run completed.'
+          : (run.error?.message ?? null),
       );
     }
     const insertArtifact = database.prepare(`
@@ -1119,12 +1125,18 @@ function importExtractedProject(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const operation of payload.conceptScreenOperations) {
+      const interrupted = operation.status === 'running';
       insertOperation.run(
-        runIds.get(operation.runId)!, operation.ordinal, operation.status,
-        operation.startedAt, operation.completedAt, operation.durationMs,
+        runIds.get(operation.runId)!, operation.ordinal,
+        interrupted ? 'failed' : operation.status,
+        operation.startedAt, interrupted ? timestamp : operation.completedAt,
+        operation.durationMs,
         remapNullable(assetIds, operation.assetId), operation.responseId,
-        operation.requestId, json(operation.usage), operation.error?.code ?? null,
-        operation.error?.message ?? null,
+        operation.requestId, json(operation.usage),
+        interrupted ? 'generation_interrupted' : (operation.error?.code ?? null),
+        interrupted
+          ? 'Generation was interrupted before this operation completed.'
+          : (operation.error?.message ?? null),
       );
     }
     const insertCurrent = database.prepare(`
@@ -1172,9 +1184,11 @@ function importExtractedProject(
       ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const candidate of payload.candidates) {
+      const interrupted = candidate.status === 'running';
       insertCandidate.run(
         candidateIds.get(candidate.id)!, projectId, candidate.runKind,
-        candidate.status, candidate.currentStage, candidate.completedOperationCount,
+        interrupted ? 'failed' : candidate.status,
+        candidate.currentStage, candidate.completedOperationCount,
         candidate.startStage, candidate.insightSource,
         remapNullable(revisionIds, candidate.insightRevisionId),
         JSON.stringify(candidate.configuration),
@@ -1185,8 +1199,11 @@ function importExtractedProject(
         remapNullable(runIds, candidate.prdRunId),
         remapNullable(artifactIds, candidate.prdArtifactId),
         JSON.stringify(remapJsonIds(candidate.warnings, remapMaps)),
-        candidate.error?.code ?? null, candidate.error?.message ?? null,
-        candidate.startedAt, candidate.updatedAt,
+        interrupted ? 'generation_interrupted' : (candidate.error?.code ?? null),
+        interrupted
+          ? 'Full Generation was interrupted and can be resumed.'
+          : (candidate.error?.message ?? null),
+        candidate.startedAt, interrupted ? timestamp : candidate.updatedAt,
       );
     }
     const insertPending = database.prepare(`
