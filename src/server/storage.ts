@@ -44,7 +44,7 @@ export async function initializeStorage(
         value TEXT NOT NULL
       );
       INSERT INTO app_metadata (key, value)
-      VALUES ('schema_version', '4')
+      VALUES ('schema_version', '5')
       ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
       CREATE TABLE IF NOT EXISTS projects (
@@ -153,6 +153,15 @@ export async function initializeStorage(
         created_at TEXT NOT NULL
       );
 
+      CREATE TABLE IF NOT EXISTS insight_revisions (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL UNIQUE
+          REFERENCES projects(id) ON DELETE CASCADE,
+        insight_source TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
       CREATE TABLE IF NOT EXISTS workflow_candidates (
         id TEXT PRIMARY KEY,
         project_id TEXT NOT NULL UNIQUE
@@ -172,6 +181,8 @@ export async function initializeStorage(
         start_stage TEXT NOT NULL DEFAULT 'design_brief'
           CHECK (start_stage IN ('design_brief', 'concept_screens', 'prd')),
         insight_source TEXT NOT NULL,
+        insight_revision_id TEXT UNIQUE
+          REFERENCES insight_revisions(id) ON DELETE RESTRICT,
         configuration_json TEXT NOT NULL,
         design_brief_run_id TEXT REFERENCES stage_runs(id) ON DELETE SET NULL,
         design_brief_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
@@ -251,6 +262,11 @@ export async function initializeStorage(
     if (!candidateColumns.some(({ name }) => name === 'run_kind')) {
       database.exec(
         "ALTER TABLE workflow_candidates ADD COLUMN run_kind TEXT NOT NULL DEFAULT 'initial';",
+      );
+    }
+    if (!candidateColumns.some(({ name }) => name === 'insight_revision_id')) {
+      database.exec(
+        'ALTER TABLE workflow_candidates ADD COLUMN insight_revision_id TEXT REFERENCES insight_revisions(id) ON DELETE RESTRICT;',
       );
     }
 

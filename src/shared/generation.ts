@@ -286,8 +286,17 @@ export interface CandidateWorkflow {
   error: { code: string; message: string } | null;
 }
 
+export interface InsightRevision {
+  id: string;
+  projectId: string;
+  insightSource: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export interface ProjectWorkflow {
   projectId: string;
+  insightRevision: InsightRevision | null;
   rerunPlan: WorkflowRerunPlan | null;
   snapshots: WorkflowSnapshotSummary[];
   canGenerateFullWorkflow: boolean;

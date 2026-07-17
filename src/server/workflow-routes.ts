@@ -11,6 +11,10 @@ interface ProjectParameters {
   id: string;
 }
 
+interface InsightRevisionPatch {
+  insightSource?: unknown;
+}
+
 export interface WorkflowRouteOptions {
   beforeGeneration?: () => Promise<void>;
 }
@@ -161,6 +165,64 @@ export function registerWorkflowRoutes(
         await options.beforeGeneration?.();
         const workflow = await workflows.generateFullWorkflow(request.params.id);
         return reply.status(201).send(workflow);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: ProjectParameters }>(
+    '/api/projects/:id/insight-revisions',
+    async (request, reply) => {
+      try {
+        return reply.status(201).send(
+          workflows.beginInsightRevision(request.params.id),
+        );
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.patch<{ Params: ProjectParameters; Body: InsightRevisionPatch }>(
+    '/api/projects/:id/insight-revisions/active',
+    async (request, reply) => {
+      if (typeof request.body?.insightSource !== 'string') {
+        return reply.status(400).send({
+          code: 'invalid_input',
+          error: 'Insight Revision must be text.',
+        });
+      }
+      try {
+        return workflows.updateInsightRevision(
+          request.params.id,
+          request.body.insightSource,
+        );
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: ProjectParameters }>(
+    '/api/projects/:id/insight-revisions/active/generation',
+    async (request, reply) => {
+      try {
+        await options.beforeGeneration?.();
+        return reply.status(201).send(
+          await workflows.generateInsightRevision(request.params.id),
+        );
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.delete<{ Params: ProjectParameters }>(
+    '/api/projects/:id/insight-revisions/active',
+    async (request, reply) => {
+      try {
+        return workflows.discardInsightRevision(request.params.id);
       } catch (error) {
         return handleWorkflowError(error, reply);
       }

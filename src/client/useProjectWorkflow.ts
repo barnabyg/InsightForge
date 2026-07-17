@@ -33,6 +33,10 @@ export interface ProjectWorkflowController {
   generatePrd(): Promise<ProjectWorkflow>;
   generateFullWorkflow(): Promise<ProjectWorkflow>;
   regenerateWorkflow(startStage: GeneratedStageId): Promise<ProjectWorkflow>;
+  beginInsightRevision(): Promise<ProjectWorkflow>;
+  updateInsightRevision(insightSource: string): Promise<ProjectWorkflow>;
+  generateInsightRevision(): Promise<ProjectWorkflow>;
+  discardInsightRevision(): Promise<ProjectWorkflow>;
   resumeFullWorkflow(): Promise<ProjectWorkflow>;
   promoteFullWorkflow(): Promise<ProjectWorkflow>;
   keepCandidateAfterWarningReview(): Promise<ProjectWorkflow>;
@@ -212,6 +216,43 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
           } satisfies WorkflowRerunRequest),
         },
       );
+    },
+
+    async beginInsightRevision() {
+      const next = await requestWorkflow(
+        `/api/projects/${projectId}/insight-revisions`,
+        { method: 'POST' },
+      );
+      setWorkflow(next);
+      return next;
+    },
+
+    async updateInsightRevision(insightSource) {
+      const next = await requestWorkflow(
+        `/api/projects/${projectId}/insight-revisions/active`,
+        {
+          method: 'PATCH',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ insightSource }),
+        },
+      );
+      setWorkflow(next);
+      return next;
+    },
+
+    async generateInsightRevision() {
+      return runFullGeneration(
+        `/api/projects/${projectId}/insight-revisions/active/generation`,
+      );
+    },
+
+    async discardInsightRevision() {
+      const next = await requestWorkflow(
+        `/api/projects/${projectId}/insight-revisions/active`,
+        { method: 'DELETE' },
+      );
+      setWorkflow(next);
+      return next;
     },
 
     async resumeFullWorkflow() {

@@ -72,6 +72,7 @@ export function App() {
           }}
           onSaveInsight={(insightSource) =>
             projects.updateInsightSource(projects.currentProject!.id, insightSource)}
+          onRevisionPromoted={projects.refreshCurrentProject}
         />
       ) : (
         <div className={classes('workspace')}>

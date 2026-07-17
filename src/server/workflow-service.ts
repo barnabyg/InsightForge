@@ -25,6 +25,7 @@ import type {
   DesignBriefRun,
   FullGenerationProgressEvent,
   GeneratedStageId,
+  InsightRevision,
   PrdArtifact,
   PrdGenerationResult,
   PrdRun,
@@ -135,6 +136,7 @@ interface CandidateRow {
   current_stage: CandidateWorkflow['currentStage'];
   completed_operation_count: number;
   insight_source: string;
+  insight_revision_id: string | null;
   configuration_json: string;
   design_brief_run_id: string | null;
   design_brief_artifact_id: string | null;
@@ -148,6 +150,14 @@ interface CandidateRow {
   started_at: string;
   updated_at: string;
   start_stage: GeneratedStageId;
+}
+
+interface InsightRevisionRow {
+  id: string;
+  project_id: string;
+  insight_source: string;
+  created_at: string;
+  updated_at: string;
 }
 
 interface WorkflowSnapshotRow {
@@ -177,6 +187,10 @@ export interface WorkflowService {
     projectId: string,
     startStage: GeneratedStageId,
   ): Promise<ProjectWorkflow>;
+  beginInsightRevision(projectId: string): ProjectWorkflow;
+  updateInsightRevision(projectId: string, insightSource: string): ProjectWorkflow;
+  generateInsightRevision(projectId: string): Promise<ProjectWorkflow>;
+  discardInsightRevision(projectId: string): ProjectWorkflow;
   resumeFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
   promoteFullWorkflow(projectId: string): ProjectWorkflow;
   keepCandidateAfterWarningReview(projectId: string): ProjectWorkflow;
@@ -281,6 +295,19 @@ function candidateFromRow(row: CandidateRow | undefined): CandidateWorkflow | nu
     error: row.error_code && row.error_message
       ? { code: row.error_code, message: row.error_message }
       : null,
+  };
+}
+
+function insightRevisionFromRow(
+  row: InsightRevisionRow | undefined,
+): InsightRevision | null {
+  if (!row) return null;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    insightSource: row.insight_source,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at,
   };
 }
 
@@ -651,6 +678,14 @@ export async function openWorkflowService(
     `).get(projectId) as unknown as CandidateRow | undefined;
   }
 
+  function insightRevisionRow(projectId: string): InsightRevisionRow | undefined {
+    return database.prepare(`
+      SELECT id, project_id, insight_source, created_at, updated_at
+      FROM insight_revisions
+      WHERE project_id = ?
+    `).get(projectId) as unknown as InsightRevisionRow | undefined;
+  }
+
   function requireCandidate(projectId: string, candidateId?: string): CandidateRow {
     const candidate = candidateRow(projectId);
     if (!candidate || (candidateId && candidate.id !== candidateId)) {
@@ -870,7 +905,20 @@ export async function openWorkflowService(
       throw new WorkflowValidationError('The Candidate Workflow is not complete.');
     }
     const project = requireProject(candidate.project_id);
-    if (project.insight_source !== candidate.insight_source) {
+    const revision = candidate.insight_revision_id
+      ? database.prepare(`
+          SELECT id, project_id, insight_source, created_at, updated_at
+          FROM insight_revisions
+          WHERE id = ? AND project_id = ?
+        `).get(candidate.insight_revision_id, candidate.project_id) as unknown as
+          InsightRevisionRow | undefined
+      : undefined;
+    if (candidate.insight_revision_id && revision?.insight_source !== candidate.insight_source) {
+      throw new WorkflowValidationError(
+        'The Insight Revision changed while its Candidate Workflow was running.',
+      );
+    }
+    if (!candidate.insight_revision_id && project.insight_source !== candidate.insight_source) {
       throw new WorkflowValidationError(
         'The Insight Source changed while Full Generation was running.',
       );
@@ -905,9 +953,19 @@ export async function openWorkflowService(
       setCurrent.run(candidate.project_id, 'design_brief', candidate.design_brief_artifact_id);
       setCurrent.run(candidate.project_id, 'concept_screens', candidate.concept_screen_artifact_id);
       setCurrent.run(candidate.project_id, 'prd', candidate.prd_artifact_id);
+      if (revision) {
+        database.prepare(`
+          UPDATE projects
+          SET insight_source = ?, updated_at = ?
+          WHERE id = ?
+        `).run(revision.insight_source, now().toISOString(), candidate.project_id);
+      }
       database.prepare('DELETE FROM pending_cascades WHERE project_id = ?')
         .run(candidate.project_id);
       database.prepare('DELETE FROM workflow_candidates WHERE id = ?').run(candidate.id);
+      if (revision) {
+        database.prepare('DELETE FROM insight_revisions WHERE id = ?').run(revision.id);
+      }
       database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
         .run(now().toISOString(), candidate.project_id);
       database.exec('COMMIT;');
@@ -1006,6 +1064,7 @@ export async function openWorkflowService(
     const candidate = candidateRow(projectId);
     return {
       projectId,
+      insightRevision: insightRevisionFromRow(insightRevisionRow(projectId)),
       rerunPlan: readWorkflowRerunPlan(database, projectId),
       snapshots: workflowSnapshots(projectId),
       canGenerateFullWorkflow: hasInsight && !candidate && !hasWorkflow,
@@ -1133,6 +1192,7 @@ export async function openWorkflowService(
       assertGenerationAvailable(projectId, candidateId);
       const candidate = candidateId ? requireCandidate(projectId, candidateId) : null;
       const project = requireProject(projectId);
+      const insightSource = candidate?.insight_source ?? project.insight_source;
       if (activeDesignBriefRuns.has(projectId)) {
         throw new WorkflowValidationError(
           'Design Brief generation is already running for this Project.',
@@ -1148,7 +1208,7 @@ export async function openWorkflowService(
           'PRD generation is already running for this Project.',
         );
       }
-      if (!project.insight_source.trim()) {
+      if (!insightSource.trim()) {
         throw new WorkflowValidationError(
           'Add an Insight Source before generating a Design Brief.',
         );
@@ -1162,7 +1222,7 @@ export async function openWorkflowService(
         ? candidateConfigurations(candidate).designBrief
         : designBriefConfiguration();
       const runKind = classifyStageRun(projectId, 'design_brief', {
-        input: project.insight_source,
+        input: insightSource,
         prompt: configuration.prompt,
         model: configuration.model,
         settings: 'null',
@@ -1179,7 +1239,7 @@ export async function openWorkflowService(
         configuration.prompt,
         '',
         'Stage Input — Insight Source:',
-        project.insight_source,
+        insightSource,
       ].join('\n');
       database.prepare(`
         INSERT INTO stage_runs (
@@ -1195,7 +1255,7 @@ export async function openWorkflowService(
         configuration.prompt,
         configuration.model,
         configuration.updated_at,
-        project.insight_source,
+        insightSource,
         assembledRequest,
       );
       if (candidate) {
@@ -1214,7 +1274,7 @@ export async function openWorkflowService(
         generated = await options.textGeneration.generateDesignBrief({
           model: configuration.model,
           stagePrompt: configuration.prompt,
-          insightSource: project.insight_source,
+          insightSource,
         });
         validation = validateDesignBrief(generated.markdown);
       } catch (error) {
@@ -2331,6 +2391,126 @@ export async function openWorkflowService(
       return continueFullCandidate(requireCandidate(projectId, candidateId));
     },
 
+    beginInsightRevision(projectId) {
+      requireProject(projectId);
+      const existing = insightRevisionRow(projectId);
+      if (existing) return readProjectWorkflow(projectId);
+      if (candidateRow(projectId)) {
+        throw new WorkflowValidationError(
+          'Resume or discard the existing Candidate Workflow first.',
+        );
+      }
+      if (!hasCurrentWorkflow(projectId)) {
+        throw new WorkflowValidationError(
+          'Generate the complete workflow before revising the Insight Source.',
+        );
+      }
+      const project = requireProject(projectId);
+      const timestamp = now().toISOString();
+      database.prepare(`
+        INSERT INTO insight_revisions (
+          id, project_id, insight_source, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?)
+      `).run(randomUUID(), projectId, project.insight_source, timestamp, timestamp);
+      return readProjectWorkflow(projectId);
+    },
+
+    updateInsightRevision(projectId, insightSource) {
+      requireProject(projectId);
+      if (candidateRow(projectId)) {
+        throw new WorkflowValidationError(
+          'The Insight Revision cannot change after candidate generation starts.',
+        );
+      }
+      const result = database.prepare(`
+        UPDATE insight_revisions
+        SET insight_source = ?, updated_at = ?
+        WHERE project_id = ?
+      `).run(insightSource, now().toISOString(), projectId);
+      if (result.changes === 0) {
+        throw new WorkflowValidationError('Begin an Insight Revision before editing it.');
+      }
+      return readProjectWorkflow(projectId);
+    },
+
+    async generateInsightRevision(projectId) {
+      const project = requireProject(projectId);
+      const revision = insightRevisionRow(projectId);
+      if (!revision) {
+        throw new WorkflowValidationError('Begin an Insight Revision before generating it.');
+      }
+      if (!revision.insight_source.trim()) {
+        throw new WorkflowValidationError(
+          'Add an Insight Source to the revision before generating it.',
+        );
+      }
+      if (revision.insight_source === project.insight_source) {
+        throw new WorkflowValidationError(
+          'Change the Insight Source before generating its revision.',
+        );
+      }
+      if (!hasCurrentWorkflow(projectId)) {
+        throw new WorkflowValidationError(
+          'Generate the complete workflow before revising the Insight Source.',
+        );
+      }
+      if (candidateRow(projectId)) {
+        throw new WorkflowValidationError(
+          'Resume or discard the existing Candidate Workflow first.',
+        );
+      }
+      if (
+        activeDesignBriefRuns.has(projectId)
+        || activeConceptRuns.has(projectId)
+        || activePrdRuns.has(projectId)
+        || activeFullRuns.has(projectId)
+      ) {
+        throw new WorkflowValidationError(
+          'Generation is already running for this Project.',
+        );
+      }
+      const candidateId = randomUUID();
+      const startedAt = now().toISOString();
+      const configurations: CandidateConfigurations = {
+        designBrief: designBriefConfiguration(),
+        conceptScreens: conceptScreenConfiguration(),
+        prd: prdConfiguration(),
+      };
+      database.prepare(`
+        INSERT INTO workflow_candidates (
+          id, project_id, run_kind, status, current_stage, completed_operation_count,
+          start_stage, insight_source, insight_revision_id, configuration_json,
+          started_at, updated_at
+        ) VALUES (?, ?, 'regeneration', 'running', 'design_brief', 0,
+                  'design_brief', ?, ?, ?, ?, ?)
+      `).run(
+        candidateId,
+        projectId,
+        revision.insight_source,
+        revision.id,
+        JSON.stringify(configurations),
+        startedAt,
+        startedAt,
+      );
+      return continueFullCandidate(requireCandidate(projectId, candidateId));
+    },
+
+    discardInsightRevision(projectId) {
+      requireProject(projectId);
+      if (candidateRow(projectId)) {
+        throw new WorkflowValidationError(
+          'Discard the Candidate Workflow to discard its Insight Revision.',
+        );
+      }
+      const result = database.prepare(
+        'DELETE FROM insight_revisions WHERE project_id = ?',
+      ).run(projectId);
+      if (result.changes === 0) {
+        throw new WorkflowValidationError('There is no Insight Revision to discard.');
+      }
+      return readProjectWorkflow(projectId);
+    },
+
     async resumeFullWorkflow(projectId) {
       requireProject(projectId);
       const candidate = requireCandidate(projectId);
@@ -2403,6 +2583,10 @@ export async function openWorkflowService(
       database.exec('BEGIN IMMEDIATE;');
       try {
         database.prepare('DELETE FROM workflow_candidates WHERE id = ?').run(candidate.id);
+        if (candidate.insight_revision_id) {
+          database.prepare('DELETE FROM insight_revisions WHERE id = ?')
+            .run(candidate.insight_revision_id);
+        }
         database.prepare('DELETE FROM pending_cascades WHERE project_id = ?').run(projectId);
         const deleteRun = database.prepare('DELETE FROM stage_runs WHERE id = ?');
         runIds.forEach((runId) => deleteRun.run(runId));

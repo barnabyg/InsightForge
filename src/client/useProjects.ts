@@ -26,6 +26,7 @@ export interface ProjectsController {
   error: string | null;
   createProject(input?: CreateProjectInput): Promise<Project>;
   openProject(id: string): Promise<void>;
+  refreshCurrentProject(): Promise<Project>;
   refreshLibrary(): Promise<void>;
   showLibrary(): void;
   updateInsightSource(id: string, insightSource: string): Promise<Project>;
@@ -145,6 +146,18 @@ export function useProjects(): ProjectsController {
 
     async openProject(id) {
       await run(() => loadProject(id, true));
+    },
+
+    async refreshCurrentProject() {
+      if (!currentProject) {
+        throw new Error('No Project is open.');
+      }
+      return run(async () => {
+        const project = await requestJson<Project>(`/api/projects/${currentProject.id}`);
+        setCurrentProject(project);
+        await refreshLibrary();
+        return project;
+      });
     },
 
     showLibrary() {

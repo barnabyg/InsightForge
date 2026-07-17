@@ -276,6 +276,102 @@ describe('Workflow HTTP API', () => {
     });
   });
 
+  it('creates, edits, and generates an Insight Revision through explicit commands', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const app = await buildApp({ dataDirectory, mode: 'mock' });
+    apps.push(app);
+    const originalInsight = 'Authors need a coherent way to compare candidate neighbourhoods.';
+    const revisedInsight = 'Authors need to compare neighbourhoods, commutes, and accessibility.';
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: { name: 'Neighbourhood decisions', insightSource: originalInsight },
+    });
+    const projectId = created.json().id as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations`,
+      headers: { host: 'localhost:4317' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/resume`,
+      headers: { host: 'localhost:4317' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/resume`,
+      headers: { host: 'localhost:4317' },
+    });
+    const original = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/promotion`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    const begun = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/insight-revisions`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(begun.statusCode).toBe(201);
+    expect(begun.json().insightRevision).toMatchObject({
+      insightSource: originalInsight,
+    });
+
+    const edited = await app.inject({
+      method: 'PATCH',
+      url: `/api/projects/${projectId}/insight-revisions/active`,
+      headers: { host: 'localhost:4317' },
+      payload: { insightSource: revisedInsight },
+    });
+    expect(edited.statusCode).toBe(200);
+    expect(edited.json()).toMatchObject({
+      insightRevision: { insightSource: revisedInsight },
+      designBrief: { id: original.json().designBrief.id },
+      conceptScreenSet: { id: original.json().conceptScreenSet.id },
+      prd: { id: original.json().prd.id },
+    });
+
+    const invalidEdit = await app.inject({
+      method: 'PATCH',
+      url: `/api/projects/${projectId}/insight-revisions/active`,
+      headers: { host: 'localhost:4317' },
+      payload: { insightSource: 42 },
+    });
+    expect(invalidEdit.statusCode).toBe(400);
+    expect(invalidEdit.json()).toEqual({
+      code: 'invalid_input',
+      error: 'Insight Revision must be text.',
+    });
+
+    const generation = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/insight-revisions/active/generation`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(generation.statusCode).toBe(201);
+    expect(generation.json()).toMatchObject({
+      insightRevision: { insightSource: revisedInsight },
+      designBrief: { id: original.json().designBrief.id },
+      conceptScreenSet: { id: original.json().conceptScreenSet.id },
+      prd: { id: original.json().prd.id },
+      candidate: {
+        runKind: 'regeneration',
+        status: 'paused',
+        currentStage: 'concept_screens',
+      },
+    });
+    const currentProject = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(currentProject.json().insightSource).toBe(originalInsight);
+  });
+
   it('starts an explicitly chosen Variation Run through the public rerun command', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
     temporaryDirectories.push(dataDirectory);

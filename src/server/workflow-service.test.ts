@@ -1507,6 +1507,255 @@ describe('Workflow service', () => {
     expect(varied.lastPrdRun?.runKind).toBe('regeneration');
   });
 
+  it('persists an Insight Revision without changing the current Project or workflow', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const originalInsight = 'Busy renters need a calmer way to compare neighbourhood trade-offs.';
+    const revisedInsight = 'Busy renters need a calmer way to compare neighbourhoods and commute options.';
+    const project = projects.createProject({ insightSource: originalInsight });
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          return {
+            markdown: `# Design Brief\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: 'resp_revision_brief',
+            requestId: 'req_revision_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          return {
+            markdown: `# PRD\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: 'resp_revision_prd',
+            requestId: 'req_revision_prd',
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngFixture(input.ordinal * 35),
+            requestId: `req_revision_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await completeFullWorkflow(workflows, project.id);
+    const current = workflows.promoteFullWorkflow(project.id);
+
+    const started = workflows.beginInsightRevision(project.id);
+    expect(started.insightRevision).toMatchObject({ insightSource: originalInsight });
+
+    const edited = workflows.updateInsightRevision(project.id, revisedInsight);
+    expect(edited).toMatchObject({
+      insightRevision: { insightSource: revisedInsight },
+      designBrief: { id: current.designBrief?.id },
+      conceptScreenSet: { id: current.conceptScreenSet?.id },
+      prd: { id: current.prd?.id },
+      candidate: null,
+    });
+    expect(projects.getProject(project.id)?.insightSource).toBe(originalInsight);
+
+    workflows.close();
+    workflowServices.splice(workflowServices.indexOf(workflows), 1);
+    const reopened = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          throw new Error('Generation was not expected while reopening a revision.');
+        },
+        async generatePrd() {
+          throw new Error('Generation was not expected while reopening a revision.');
+        },
+      },
+    });
+    workflowServices.push(reopened);
+    expect(reopened.getProjectWorkflow(project.id).insightRevision).toMatchObject({
+      insightSource: revisedInsight,
+    });
+
+    const discarded = reopened.discardInsightRevision(project.id);
+    expect(discarded.insightRevision).toBeNull();
+    expect(projects.getProject(project.id)?.insightSource).toBe(originalInsight);
+  });
+
+  it('resumes an Insight Revision candidate and promotes its source and workflow atomically', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const originalInsight = 'Renters need a trustworthy way to compare neighbourhood trade-offs.';
+    const revisedInsight = 'Renters need to compare neighbourhoods, commutes, and accessibility needs.';
+    const project = projects.createProject({ insightSource: originalInsight });
+    let briefVersion = 0;
+    let prdVersion = 0;
+    let failRevision = false;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief(input) {
+          if (input.insightSource === revisedInsight && failRevision) {
+            throw new GenerationBoundaryError(
+              'openai_request_failed',
+              'The revised Design Brief failed once.',
+            );
+          }
+          briefVersion += 1;
+          return {
+            markdown: `# Design Brief ${briefVersion}\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: `resp_revision_brief_${briefVersion}`,
+            requestId: `req_revision_brief_${briefVersion}`,
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          prdVersion += 1;
+          return {
+            markdown: `# PRD ${prdVersion}\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: `resp_revision_prd_${prdVersion}`,
+            requestId: `req_revision_prd_${prdVersion}`,
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngFixture(briefVersion * 30 + input.ordinal),
+            requestId: `req_revision_screen_${briefVersion}_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await completeFullWorkflow(workflows, project.id);
+    const original = workflows.promoteFullWorkflow(project.id);
+    workflows.beginInsightRevision(project.id);
+    workflows.updateInsightRevision(project.id, revisedInsight);
+
+    failRevision = true;
+    await expect(workflows.generateInsightRevision(project.id)).rejects.toMatchObject({
+      code: 'openai_request_failed',
+    });
+    expect(workflows.getProjectWorkflow(project.id)).toMatchObject({
+      insightRevision: { insightSource: revisedInsight },
+      designBrief: { id: original.designBrief?.id },
+      conceptScreenSet: { id: original.conceptScreenSet?.id },
+      prd: { id: original.prd?.id },
+      candidate: {
+        runKind: 'regeneration',
+        status: 'failed',
+        currentStage: 'design_brief',
+        completedOperationCount: 0,
+      },
+    });
+    expect(projects.getProject(project.id)?.insightSource).toBe(originalInsight);
+
+    failRevision = false;
+    let candidate = await workflows.resumeFullWorkflow(project.id);
+    while (candidate.candidate?.status === 'paused') {
+      candidate = await workflows.resumeFullWorkflow(project.id);
+    }
+    expect(candidate).toMatchObject({
+      insightRevision: { insightSource: revisedInsight },
+      designBrief: { id: original.designBrief?.id },
+      conceptScreenSet: { id: original.conceptScreenSet?.id },
+      prd: { id: original.prd?.id },
+      candidate: { status: 'awaiting_promotion' },
+    });
+
+    const promoted = workflows.promoteFullWorkflow(project.id);
+    expect(projects.getProject(project.id)?.insightSource).toBe(revisedInsight);
+    expect(promoted).toMatchObject({
+      insightRevision: null,
+      candidate: null,
+      snapshots: [{
+        replacedFromStage: 'design_brief',
+        artifactIds: {
+          designBrief: original.designBrief?.id,
+          conceptScreens: original.conceptScreenSet?.id,
+          prd: original.prd?.id,
+        },
+      }],
+    });
+    expect(promoted.designBrief?.id).not.toBe(original.designBrief?.id);
+    expect(promoted.conceptScreenSet?.id).not.toBe(original.conceptScreenSet?.id);
+    expect(promoted.prd?.id).not.toBe(original.prd?.id);
+  });
+
+  it('discards an incomplete Insight Revision candidate without changing the current workflow', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const originalInsight = 'Authors need a stable workflow while revisions are incomplete.';
+    const revisedInsight = 'Authors need an explicitly discardable revision candidate.';
+    const project = projects.createProject({ insightSource: originalInsight });
+    let rejectRevision = false;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief(input) {
+          if (rejectRevision && input.insightSource === revisedInsight) {
+            throw new GenerationBoundaryError(
+              'openai_request_failed',
+              'The revised workflow is incomplete.',
+            );
+          }
+          return {
+            markdown: `# Design Brief\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: 'resp_discard_revision_brief',
+            requestId: 'req_discard_revision_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          return {
+            markdown: `# PRD\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: 'resp_discard_revision_prd',
+            requestId: 'req_discard_revision_prd',
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngFixture(input.ordinal * 40),
+            requestId: `req_discard_revision_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await completeFullWorkflow(workflows, project.id);
+    const original = workflows.promoteFullWorkflow(project.id);
+    workflows.beginInsightRevision(project.id);
+    workflows.updateInsightRevision(project.id, revisedInsight);
+    rejectRevision = true;
+    await expect(workflows.generateInsightRevision(project.id)).rejects.toMatchObject({
+      code: 'openai_request_failed',
+    });
+
+    const discarded = await workflows.discardFullWorkflow(project.id);
+
+    expect(projects.getProject(project.id)?.insightSource).toBe(originalInsight);
+    expect(discarded).toMatchObject({
+      insightRevision: null,
+      candidate: null,
+      designBrief: { id: original.designBrief?.id },
+      conceptScreenSet: { id: original.conceptScreenSet?.id },
+      prd: { id: original.prd?.id },
+    });
+  });
+
   it('resumes a failed Candidate Workflow at the failed operation without automatic retry', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);

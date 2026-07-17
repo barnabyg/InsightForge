@@ -165,3 +165,63 @@ test('Author reviews sanity warnings before promoting a complete Candidate Workf
   await page.getByRole('button', { name: /PRD/ }).click();
   await expect(page.getByRole('article', { name: 'PRD Artifact' })).toBeVisible();
 });
+
+test('Author revises an Insight without exposing mixed workflow state', async ({ page }) => {
+  const originalInsight = 'Authors need a coherent way to compare neighbourhood trade-offs.';
+  const revisedInsight = '[mock:image-failure-once-2] Authors need to compare neighbourhoods, commutes, and accessibility.';
+  await createProject(page, originalInsight);
+  await startFullGeneration(page);
+  await expect(page.getByRole('status', { name: 'Generating complete workflow' }))
+    .toHaveCount(0, { timeout: 15_000 });
+
+  await page.getByRole('button', { name: 'Revise Insight' }).click();
+  const revisionEditor = page.getByRole('dialog', { name: 'Revise Insight' });
+  await revisionEditor.getByRole('textbox', { name: 'Revised Insight Source' })
+    .fill(revisedInsight);
+  await expect(revisionEditor.getByRole('status', { name: 'Insight Revision saved' }))
+    .toBeVisible();
+
+  await page.reload();
+  await page.getByRole('button', { name: 'Resume Insight Revision' }).click();
+  const resumedEditor = page.getByRole('dialog', { name: 'Revise Insight' });
+  await expect(resumedEditor.getByRole('textbox', { name: 'Revised Insight Source' }))
+    .toHaveValue(revisedInsight);
+  await resumedEditor.getByRole('button', { name: 'Review regeneration' }).click();
+
+  const impact = page.getByRole('dialog', { name: 'Generate revised workflow?' });
+  await expect(impact).toContainText('Design Brief');
+  await expect(impact).toContainText('Concept Screens');
+  await expect(impact).toContainText('PRD');
+  await expect(impact).toContainText('5 OpenAI operations');
+  await expect(impact).toContainText('current coherent workflow remains visible');
+  await impact.getByRole('button', { name: 'Generate revised workflow' }).click();
+
+  const failedCandidate = page.getByRole('status').filter({
+    hasText: 'Candidate generation failed',
+  });
+  await expect(failedCandidate).toContainText('2 of 5 operations complete', {
+    timeout: 15_000,
+  });
+  await expect(page.getByRole('textbox', { name: 'Insight Source' }))
+    .toHaveValue(originalInsight);
+  await page.getByRole('button', { name: /Design Brief/ }).click();
+  await expect(page.getByRole('article', { name: 'Design Brief Artifact' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Insight Source' }).click();
+  await page.getByRole('button', { name: 'Resume Candidate Workflow' }).click();
+  await expect(page.getByRole('status', { name: 'Generating complete workflow' }))
+    .toHaveCount(0, { timeout: 15_000 });
+  await expect(page.getByRole('textbox', { name: 'Insight Source' }))
+    .toHaveValue(revisedInsight);
+  await expect(page.getByRole('button', { name: 'Revise Insight' })).toBeVisible();
+
+  await page.getByRole('button', { name: 'Revise Insight' }).click();
+  const discardableRevision = page.getByRole('dialog', { name: 'Revise Insight' });
+  await discardableRevision.getByRole('textbox', { name: 'Revised Insight Source' })
+    .fill(`${revisedInsight}\nA draft direction that will be discarded.`);
+  await expect(discardableRevision.getByRole('status', { name: 'Insight Revision saved' }))
+    .toBeVisible();
+  await discardableRevision.getByRole('button', { name: 'Discard revision' }).click();
+  await expect(discardableRevision).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Revise Insight' })).toBeVisible();
+});

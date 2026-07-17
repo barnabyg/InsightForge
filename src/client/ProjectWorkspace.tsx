@@ -15,6 +15,7 @@ interface ProjectWorkspaceProps {
   onShowLibrary(): void;
   onEditPrompts(): void;
   onSaveInsight(insightSource: string): Promise<Project>;
+  onRevisionPromoted(): Promise<Project>;
 }
 
 type SaveState = 'saved' | 'pending' | 'saving' | 'error';
@@ -98,6 +99,7 @@ export function ProjectWorkspace({
   onShowLibrary,
   onEditPrompts,
   onSaveInsight,
+  onRevisionPromoted,
 }: ProjectWorkspaceProps) {
   const [selectedStage, setSelectedStage] = useState<SelectedStage>('insight_source');
   const [insight, setInsight] = useState(project.insightSource);
@@ -106,6 +108,10 @@ export function ProjectWorkspace({
   const [confirmCascade, setConfirmCascade] = useState<'regeneration' | 'variation' | null>(null);
   const [confirmRerun, setConfirmRerun] = useState<GeneratedStageId | null>(null);
   const [confirmFullGeneration, setConfirmFullGeneration] = useState(false);
+  const [revisionEditorOpen, setRevisionEditorOpen] = useState(false);
+  const [confirmRevisionGeneration, setConfirmRevisionGeneration] = useState(false);
+  const [revisionDraft, setRevisionDraft] = useState<string | null>(null);
+  const [revisionSaveState, setRevisionSaveState] = useState<'saved' | 'saving' | 'error'>('saved');
   const [importError, setImportError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const workflow = useProjectWorkflow(project.id);
@@ -183,6 +189,22 @@ export function ProjectWorkspace({
   }, [insight, onSaveInsight, project.insightSource, saveState]);
 
   useEffect(() => {
+    const persisted = workflow.workflow?.insightRevision?.insightSource;
+    if (!revisionEditorOpen || revisionDraft === null || persisted === undefined) return;
+    if (revisionDraft === persisted) {
+      setRevisionSaveState('saved');
+      return;
+    }
+    setRevisionSaveState('saving');
+    const timer = window.setTimeout(() => {
+      void workflow.updateInsightRevision(revisionDraft)
+        .then(() => setRevisionSaveState('saved'))
+        .catch(() => setRevisionSaveState('error'));
+    }, 450);
+    return () => window.clearTimeout(timer);
+  }, [revisionDraft, revisionEditorOpen, workflow.workflow?.insightRevision?.insightSource]);
+
+  useEffect(() => {
     function warnBeforeUnload(event: BeforeUnloadEvent) {
       if (latestInsight.current !== savedInsight.current) event.preventDefault();
     }
@@ -220,6 +242,38 @@ export function ProjectWorkspace({
       }
     }
     setSelectedStage(stage);
+  }
+
+  async function openRevisionEditor(): Promise<void> {
+    const next = workflow.workflow?.insightRevision
+      ? workflow.workflow
+      : await workflow.beginInsightRevision();
+    if (!next.insightRevision) return;
+    setRevisionDraft(next.insightRevision.insightSource);
+    setRevisionSaveState('saved');
+    setRevisionEditorOpen(true);
+  }
+
+  async function reviewRevisionGeneration(): Promise<void> {
+    if (revisionDraft === null) return;
+    await workflow.updateInsightRevision(revisionDraft);
+    setRevisionSaveState('saved');
+    setRevisionEditorOpen(false);
+    setConfirmRevisionGeneration(true);
+  }
+
+  function applyPromotedProject(nextProject: Project): void {
+    setInsight(nextProject.insightSource);
+    latestInsight.current = nextProject.insightSource;
+    savedInsight.current = nextProject.insightSource;
+    setSaveState('saved');
+  }
+
+  async function generateRevision(): Promise<void> {
+    const next = await workflow.generateInsightRevision();
+    if (!next.insightRevision && !next.candidate) {
+      applyPromotedProject(await onRevisionPromoted());
+    }
   }
 
   const savePresentation = {
@@ -278,11 +332,19 @@ export function ProjectWorkspace({
     ? candidatePresentationByStatus[candidate.status]
     : null;
   const candidatePrimaryAction = candidatePresentation
-    ? {
-        cancel: workflow.cancelFullWorkflow,
-        promote: workflow.promoteFullWorkflow,
-        resume: workflow.resumeFullWorkflow,
-      }[candidatePresentation.primaryAction]
+    ? async () => {
+        if (candidatePresentation.primaryAction === 'cancel') {
+          await workflow.cancelFullWorkflow();
+          return;
+        }
+        const hadInsightRevision = Boolean(workflow.workflow?.insightRevision);
+        const next = candidatePresentation.primaryAction === 'promote'
+          ? await workflow.promoteFullWorkflow()
+          : await workflow.resumeFullWorkflow();
+        if (hadInsightRevision && !next.insightRevision && !next.candidate) {
+          applyPromotedProject(await onRevisionPromoted());
+        }
+      }
     : null;
   const fullStageName = {
     design_brief: 'Design Brief',
@@ -486,20 +548,32 @@ export function ProjectWorkspace({
                 <h2 id="insight-title">What signal is worth pursuing?</h2>
                 <p>Write the raw observation, problem, or opportunity. This is the source for the entire workflow.</p>
               </div>
-              <label className={`${styles['import-action']} ${insightLocked ? styles['import-action--disabled'] : ''}`}>
-                <span aria-hidden="true">↑</span> Import .txt or .md
-                <input
-                  className={styles['visually-hidden']}
-                  type="file"
-                  accept=".txt,.md,text/plain,text/markdown"
-                  aria-label="Import Insight Source file"
-                  disabled={insightLocked}
-                  onChange={(event) => {
-                    void chooseImport(event.target.files?.[0]);
-                    event.target.value = '';
-                  }}
-                />
-              </label>
+              <div className={styles['editor-actions']}>
+                {completeWorkflow && (
+                  <button
+                    className={styles['secondary-action']}
+                    type="button"
+                    disabled={Boolean(candidate) || workflow.generating}
+                    onClick={() => void openRevisionEditor().catch(() => undefined)}
+                  >{workflow.workflow?.insightRevision
+                      ? 'Resume Insight Revision'
+                      : 'Revise Insight'}</button>
+                )}
+                <label className={`${styles['import-action']} ${insightLocked ? styles['import-action--disabled'] : ''}`}>
+                  <span aria-hidden="true">↑</span> Import .txt or .md
+                  <input
+                    className={styles['visually-hidden']}
+                    type="file"
+                    accept=".txt,.md,text/plain,text/markdown"
+                    aria-label="Import Insight Source file"
+                    disabled={insightLocked}
+                    onChange={(event) => {
+                      void chooseImport(event.target.files?.[0]);
+                      event.target.value = '';
+                    }}
+                  />
+                </label>
+              </div>
             </div>
             <label className={styles['editor-label']}>
               <span className={styles['visually-hidden']}>Insight Source</span>
@@ -519,7 +593,7 @@ export function ProjectWorkspace({
             </footer>
             {insightLocked && (
               <p className={styles['insight-lock-message']} id="insight-lock-message">
-                Insight Source is locked after generation to keep the current workflow consistent.
+                Insight Source is locked after generation. Use Revise Insight to prepare a replacement without changing the current workflow.
               </p>
             )}
             {importError && <p className={styles['inline-error']} role="alert">{importError}</p>}
@@ -539,7 +613,9 @@ export function ProjectWorkspace({
                 <h2>Generate the complete workflow</h2>
                 <p>One Design Brief request, three sequential Concept Screens, and one PRD request. Current artifacts change only after the complete Candidate Workflow succeeds.</p>
               </div>
-              {!candidate && workflow.generatingStage !== 'full_generation' && (
+              {!candidate
+                && !workflow.workflow?.insightRevision
+                && workflow.generatingStage !== 'full_generation' && (
                 <button
                   className={completeWorkflow && !rerunPlan
                     ? styles['secondary-action']
@@ -889,6 +965,83 @@ export function ProjectWorkspace({
             />
           </div>
         </main>
+      )}
+
+      {revisionEditorOpen && revisionDraft !== null && (
+        <Modal
+          title="Revise Insight"
+          onDismiss={() => setRevisionEditorOpen(false)}
+          actions={<>
+            <button className={styles['secondary-action']} type="button" onClick={() => setRevisionEditorOpen(false)}>Close for now</button>
+            <button className={styles['danger-action']} type="button" onClick={() => {
+              void workflow.discardInsightRevision().then(() => {
+                setRevisionEditorOpen(false);
+                setRevisionDraft(null);
+              }).catch(() => undefined);
+            }}>Discard revision</button>
+            <button
+              className={styles['primary-action']}
+              type="button"
+              disabled={
+                !revisionDraft.trim()
+                || revisionDraft === insight
+                || revisionSaveState === 'saving'
+              }
+              onClick={() => void reviewRevisionGeneration().catch(() => undefined)}
+            >Review regeneration</button>
+          </>}
+        >
+          <div className={styles['revision-editor']}>
+            <p>The current Insight Source and every current Artifact stay unchanged until the complete replacement workflow is promoted.</p>
+            <label>
+              <span>Revised Insight Source</span>
+              <textarea
+                aria-label="Revised Insight Source"
+                value={revisionDraft}
+                onChange={(event) => setRevisionDraft(event.target.value)}
+              />
+            </label>
+            <span
+              className={styles['revision-save-state']}
+              role="status"
+              aria-label={revisionSaveState === 'saved'
+                ? 'Insight Revision saved'
+                : revisionSaveState === 'saving'
+                  ? 'Saving Insight Revision'
+                  : 'Insight Revision save failed'}
+            >{revisionSaveState === 'saved'
+                ? 'Revision saved locally'
+                : revisionSaveState === 'saving'
+                  ? 'Saving revision…'
+                  : 'Revision could not be saved'}</span>
+          </div>
+        </Modal>
+      )}
+
+      {confirmRevisionGeneration && (
+        <Modal
+          title="Generate revised workflow?"
+          onDismiss={() => setConfirmRevisionGeneration(false)}
+          actions={<>
+            <button className={styles['secondary-action']} type="button" onClick={() => {
+              setConfirmRevisionGeneration(false);
+              setRevisionEditorOpen(true);
+            }}>Back to revision</button>
+            <button className={styles['primary-action']} type="button" onClick={() => {
+              setConfirmRevisionGeneration(false);
+              void generateRevision().catch(() => undefined);
+            }}>Generate revised workflow</button>
+          </>}
+        >
+          <p>The revised Insight Source changes the input to the complete downstream chain:</p>
+          <ul>
+            <li>Design Brief · {workflow.workflow?.designBriefConfiguration.model ?? 'current text model'}</li>
+            <li>Concept Screens · {workflow.workflow?.conceptScreenConfiguration.model ?? 'current image model'} · {workflow.workflow?.conceptScreenConfiguration.imageQuality ?? 'current'} quality</li>
+            <li>PRD · {workflow.workflow?.prdConfiguration.model ?? 'current text model'}</li>
+          </ul>
+          <p>5 OpenAI operations will run with no automatic retry.</p>
+          <p>The current coherent workflow remains visible throughout generation and after any failure or cancellation. Promotion replaces the Insight Source and all three Artifacts together, preserving the current workflow as a Workflow Snapshot.</p>
+        </Modal>
       )}
 
       {pendingImport && (
