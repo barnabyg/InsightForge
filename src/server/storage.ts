@@ -44,7 +44,7 @@ export async function initializeStorage(
         value TEXT NOT NULL
       );
       INSERT INTO app_metadata (key, value)
-      VALUES ('schema_version', '2')
+      VALUES ('schema_version', '3')
       ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
       CREATE TABLE IF NOT EXISTS projects (
@@ -134,6 +134,32 @@ export async function initializeStorage(
         design_brief_artifact_id TEXT NOT NULL
           REFERENCES artifacts(id) ON DELETE CASCADE,
         created_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS workflow_candidates (
+        id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL UNIQUE
+          REFERENCES projects(id) ON DELETE CASCADE,
+        status TEXT NOT NULL CHECK (
+          status IN ('running', 'failed', 'cancelled', 'awaiting_warning_review')
+        ),
+        current_stage TEXT NOT NULL CHECK (
+          current_stage IN ('design_brief', 'concept_screens', 'prd', 'promotion')
+        ),
+        completed_operation_count INTEGER NOT NULL DEFAULT 0,
+        insight_source TEXT NOT NULL,
+        configuration_json TEXT NOT NULL,
+        design_brief_run_id TEXT REFERENCES stage_runs(id) ON DELETE SET NULL,
+        design_brief_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+        concept_screen_run_id TEXT REFERENCES stage_runs(id) ON DELETE SET NULL,
+        concept_screen_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+        prd_run_id TEXT REFERENCES stage_runs(id) ON DELETE SET NULL,
+        prd_artifact_id TEXT REFERENCES artifacts(id) ON DELETE SET NULL,
+        warnings_json TEXT,
+        error_code TEXT,
+        error_message TEXT,
+        started_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
       );
 
       CREATE TABLE IF NOT EXISTS binary_assets (

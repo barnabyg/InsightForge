@@ -214,6 +214,41 @@ describe('Workflow HTTP API', () => {
     expect(retrieved.json().prd).toEqual(generated.json().prd);
   });
 
+  it('generates the complete workflow atomically through Candidate Workflow commands', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const app = await buildApp({ dataDirectory, mode: 'mock' });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Atomic product workflow',
+        insightSource: 'Authors need a single bounded action that produces a coherent product workflow.',
+      },
+    });
+    const projectId = created.json().id as string;
+
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(generated.statusCode).toBe(201);
+    expect(generated.json()).toMatchObject({
+      projectId,
+      candidate: null,
+      designBrief: { stageId: 'design_brief' },
+      conceptScreenSet: {
+        stageId: 'concept_screens',
+        screens: [{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }],
+      },
+      prd: { stageId: 'prd' },
+    });
+  });
+
   it('downloads the current deliverables as a named ZIP without an OpenAI check', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
     temporaryDirectories.push(dataDirectory);

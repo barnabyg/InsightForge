@@ -951,6 +951,374 @@ describe('Workflow service', () => {
     await briefRerun;
   });
 
+  it('generates the complete workflow without exposing partial candidate artifacts', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'Authors need one safe action that turns an insight into a coherent product workflow.',
+    });
+    const calls: string[] = [];
+    let releasePrd!: () => void;
+    let prdStarted!: () => void;
+    const waitForPrd = new Promise<void>((resolve) => { prdStarted = resolve; });
+    const holdPrd = new Promise<void>((resolve) => { releasePrd = resolve; });
+    const longBrief = `# Design Brief\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`;
+    const longPrd = `# Product Requirements Document\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          calls.push('design_brief');
+          return {
+            markdown: longBrief,
+            responseId: 'resp_full_brief',
+            requestId: 'req_full_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          calls.push('prd');
+          prdStarted();
+          await holdPrd;
+          return {
+            markdown: longPrd,
+            responseId: 'resp_full_prd',
+            requestId: 'req_full_prd',
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          calls.push(`concept_screen_${input.ordinal}`);
+          return {
+            png: pngFixture(input.ordinal * 40),
+            requestId: `req_full_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+
+    const generation = workflows.generateFullWorkflow(project.id);
+    await waitForPrd;
+
+    expect(workflows.getProjectWorkflow(project.id)).toMatchObject({
+      designBrief: null,
+      conceptScreenSet: null,
+      prd: null,
+      candidate: {
+        status: 'running',
+        currentStage: 'prd',
+        completedOperationCount: 4,
+      },
+    });
+    await expect(workflows.generateConceptScreens(project.id)).rejects.toThrow(
+      'Full Generation is already running for this Project.',
+    );
+
+    releasePrd();
+    const generated = await generation;
+
+    expect(calls).toEqual([
+      'design_brief',
+      'concept_screen_1',
+      'concept_screen_2',
+      'concept_screen_3',
+      'prd',
+    ]);
+    expect(generated).toMatchObject({
+      designBrief: { markdown: longBrief.trim() },
+      conceptScreenSet: { screens: [{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }] },
+      prd: { markdown: longPrd.trim() },
+      candidate: null,
+    });
+  });
+
+  it('resumes a failed Candidate Workflow at the failed operation without automatic retry', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'A recoverable full workflow should preserve every successful candidate operation.',
+    });
+    const calls: string[] = [];
+    let prdAttempts = 0;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          calls.push('design_brief');
+          return {
+            markdown: `# Design Brief\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: 'resp_resume_brief',
+            requestId: 'req_resume_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          calls.push('prd');
+          prdAttempts += 1;
+          if (prdAttempts === 1) {
+            throw new GenerationBoundaryError(
+              'openai_request_failed',
+              'The PRD request failed once.',
+              { requestId: 'req_full_prd_failed' },
+            );
+          }
+          return {
+            markdown: `# PRD\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: 'resp_resumed_prd',
+            requestId: 'req_resumed_prd',
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          calls.push(`concept_screen_${input.ordinal}`);
+          return {
+            png: pngFixture(input.ordinal * 30),
+            requestId: `req_resume_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+
+    await expect(workflows.generateFullWorkflow(project.id)).rejects.toMatchObject({
+      code: 'openai_request_failed',
+    });
+    expect(workflows.getProjectWorkflow(project.id)).toMatchObject({
+      designBrief: null,
+      conceptScreenSet: null,
+      prd: null,
+      candidate: {
+        status: 'failed',
+        currentStage: 'prd',
+        completedOperationCount: 4,
+        error: { code: 'openai_request_failed' },
+      },
+    });
+    expect(calls).toEqual([
+      'design_brief',
+      'concept_screen_1',
+      'concept_screen_2',
+      'concept_screen_3',
+      'prd',
+    ]);
+
+    const resumed = await workflows.resumeFullWorkflow(project.id);
+
+    expect(calls).toEqual([
+      'design_brief',
+      'concept_screen_1',
+      'concept_screen_2',
+      'concept_screen_3',
+      'prd',
+      'prd',
+    ]);
+    expect(resumed).toMatchObject({
+      designBrief: { stageId: 'design_brief' },
+      conceptScreenSet: { stageId: 'concept_screens' },
+      prd: { stageId: 'prd' },
+      candidate: null,
+    });
+  });
+
+  it('summarizes Candidate Workflow warnings before explicit promotion', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'A thin mock candidate should require warning review before promotion.',
+    });
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          return {
+            markdown: '# Design Brief\n\nA concise direction.',
+            responseId: 'resp_warning_brief',
+            requestId: 'req_warning_brief',
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+        async generatePrd() {
+          return {
+            markdown: '# PRD\n\nA concise requirement.',
+            responseId: 'resp_warning_prd',
+            requestId: 'req_warning_prd',
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngFixture(input.ordinal * 35),
+            requestId: `req_warning_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+
+    const awaitingReview = await workflows.generateFullWorkflow(project.id);
+
+    expect(awaitingReview).toMatchObject({
+      designBrief: null,
+      conceptScreenSet: null,
+      prd: null,
+      candidate: {
+        status: 'awaiting_warning_review',
+        currentStage: 'promotion',
+        completedOperationCount: 5,
+        warnings: [
+          { stageId: 'design_brief', code: 'below_recommended_word_count' },
+          { stageId: 'prd', code: 'below_recommended_word_count' },
+        ],
+      },
+    });
+
+    const promoted = workflows.promoteFullWorkflow(project.id);
+
+    expect(promoted).toMatchObject({
+      designBrief: { stageId: 'design_brief' },
+      conceptScreenSet: { stageId: 'concept_screens' },
+      prd: { stageId: 'prd' },
+      candidate: null,
+    });
+  });
+
+  it('cancels Full Generation between operations and resumes the preserved candidate', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'Cancellation should stop before the next expensive operation.',
+    });
+    const calls: string[] = [];
+    let firstScreenStarted!: () => void;
+    let releaseFirstScreen!: () => void;
+    const waitForFirstScreen = new Promise<void>((resolve) => { firstScreenStarted = resolve; });
+    const holdFirstScreen = new Promise<void>((resolve) => { releaseFirstScreen = resolve; });
+    let hold = true;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          calls.push('design_brief');
+          return {
+            markdown: `# Design Brief\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: 'resp_cancel_full_brief',
+            requestId: 'req_cancel_full_brief',
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          calls.push('prd');
+          return {
+            markdown: `# PRD\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: 'resp_cancel_full_prd',
+            requestId: 'req_cancel_full_prd',
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          calls.push(`concept_screen_${input.ordinal}`);
+          if (input.ordinal === 1 && hold) {
+            firstScreenStarted();
+            await holdFirstScreen;
+          }
+          return {
+            png: pngFixture(input.ordinal * 45),
+            requestId: `req_cancel_full_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+
+    const generation = workflows.generateFullWorkflow(project.id);
+    await waitForFirstScreen;
+    expect(workflows.cancelFullWorkflow(project.id)).toBe(true);
+    releaseFirstScreen();
+    await expect(generation).rejects.toMatchObject({ code: 'cancelled' });
+
+    expect(workflows.getProjectWorkflow(project.id)).toMatchObject({
+      designBrief: null,
+      conceptScreenSet: null,
+      prd: null,
+      candidate: {
+        status: 'cancelled',
+        currentStage: 'concept_screens',
+        completedOperationCount: 2,
+      },
+    });
+    expect(calls).toEqual(['design_brief', 'concept_screen_1']);
+
+    hold = false;
+    const resumed = await workflows.resumeFullWorkflow(project.id);
+
+    expect(calls).toEqual([
+      'design_brief',
+      'concept_screen_1',
+      'concept_screen_2',
+      'concept_screen_3',
+      'prd',
+    ]);
+    expect(resumed.candidate).toBeNull();
+    expect(resumed.prd).not.toBeNull();
+  });
+
+  it('discards a failed Candidate Workflow explicitly', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'A failed candidate can be abandoned without changing the current workflow.',
+    });
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        ...prdNotExpected(),
+        async generateDesignBrief() {
+          throw new GenerationBoundaryError(
+            'openai_request_failed',
+            'The candidate Design Brief failed.',
+          );
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await expect(workflows.generateFullWorkflow(project.id)).rejects.toMatchObject({
+      code: 'openai_request_failed',
+    });
+
+    const discarded = await workflows.discardFullWorkflow(project.id);
+
+    expect(discarded).toMatchObject({
+      canGenerateFullWorkflow: true,
+      candidate: null,
+      designBrief: null,
+      conceptScreenSet: null,
+      prd: null,
+      lastDesignBriefRun: null,
+    });
+  });
+
   it('exports only the current deliverables with readable names and complete provenance', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);

@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
-import { writeFile } from 'node:fs/promises';
+import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strToU8, zipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import type {
   ArtifactValidation,
+  CandidateWarning,
+  CandidateWorkflow,
   ConceptScreenOperation,
   ConceptScreenOrdinal,
   ConceptScreenProgressEvent,
@@ -17,6 +19,7 @@ import type {
   DesignBriefArtifact,
   DesignBriefGenerationResult,
   DesignBriefRun,
+  FullGenerationProgressEvent,
   PrdArtifact,
   PrdGenerationResult,
   PrdRun,
@@ -110,17 +113,53 @@ interface ConceptOperationRow {
   relative_path: string | null;
 }
 
+interface CandidateRow {
+  id: string;
+  project_id: string;
+  status: CandidateWorkflow['status'];
+  current_stage: CandidateWorkflow['currentStage'];
+  completed_operation_count: number;
+  insight_source: string;
+  configuration_json: string;
+  design_brief_run_id: string | null;
+  design_brief_artifact_id: string | null;
+  concept_screen_run_id: string | null;
+  concept_screen_artifact_id: string | null;
+  prd_run_id: string | null;
+  prd_artifact_id: string | null;
+  warnings_json: string | null;
+  error_code: string | null;
+  error_message: string | null;
+  started_at: string;
+  updated_at: string;
+}
+
+interface CandidateConfigurations {
+  designBrief: ConfigurationRow;
+  conceptScreens: ConfigurationRow & { image_quality: ImageQuality };
+  prd: ConfigurationRow;
+}
+
 export interface WorkflowService {
   getProjectWorkflow(projectId: string): ProjectWorkflow;
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
   exportDeliverables(projectId: string): DeliverableExport;
-  generateDesignBrief(projectId: string): Promise<ProjectWorkflow>;
-  generateConceptScreens(projectId: string): Promise<ProjectWorkflow>;
-  generatePrd(projectId: string): Promise<ProjectWorkflow>;
+  generateDesignBrief(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
+  generateConceptScreens(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
+  generatePrd(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
+  generateFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
+  resumeFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
+  promoteFullWorkflow(projectId: string): ProjectWorkflow;
+  discardFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
+  cancelFullWorkflow(projectId: string): boolean;
   cancelConceptScreens(projectId: string): boolean;
   subscribeConceptScreenProgress(
     projectId: string,
     listener: (event: ConceptScreenProgressEvent) => void,
+  ): () => void;
+  subscribeFullGenerationProgress(
+    projectId: string,
+    listener: (event: FullGenerationProgressEvent) => void,
   ): () => void;
   close(): void;
 }
@@ -194,6 +233,24 @@ function validateDesignBrief(markdown: string): ArtifactValidation {
 
 function readJson<T>(value: string | null): T | null {
   return value === null ? null : JSON.parse(value) as T;
+}
+
+function candidateFromRow(row: CandidateRow | undefined): CandidateWorkflow | null {
+  if (!row) return null;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    status: row.status,
+    currentStage: row.current_stage,
+    completedOperationCount: row.completed_operation_count,
+    totalOperationCount: 5,
+    startedAt: row.started_at,
+    updatedAt: row.updated_at,
+    warnings: readJson<CandidateWarning[]>(row.warnings_json) ?? [],
+    error: row.error_code && row.error_message
+      ? { code: row.error_code, message: row.error_message }
+      : null,
+  };
 }
 
 function artifactFromRow(row: ArtifactRow | undefined): DesignBriefArtifact | null {
@@ -430,6 +487,38 @@ export async function openWorkflowService(
   const database = new DatabaseSync(join(dataDirectory, 'insightforge.sqlite'));
   database.exec('PRAGMA foreign_keys = ON;');
   const now = options.now ?? (() => new Date());
+  const hasInterruptedCandidate = Boolean(database.prepare(`
+    SELECT 1 FROM workflow_candidates WHERE status = 'running' LIMIT 1
+  `).get());
+  if (hasInterruptedCandidate) {
+    const recoveredAt = now().toISOString();
+    database.prepare(`
+    UPDATE concept_screen_operations
+    SET status = 'failed', completed_at = ?, error_code = 'generation_interrupted',
+        error_message = 'Generation was interrupted before this operation completed.'
+    WHERE status = 'running'
+      AND run_id IN (
+        SELECT concept_screen_run_id FROM workflow_candidates WHERE status = 'running'
+      )
+    `).run(recoveredAt);
+    database.prepare(`
+    UPDATE stage_runs
+    SET status = 'failed', completed_at = ?, error_code = 'generation_interrupted',
+        error_message = 'Generation was interrupted before this Stage Run completed.'
+    WHERE status = 'running' AND id IN (
+      SELECT design_brief_run_id FROM workflow_candidates WHERE status = 'running'
+      UNION SELECT concept_screen_run_id FROM workflow_candidates WHERE status = 'running'
+      UNION SELECT prd_run_id FROM workflow_candidates WHERE status = 'running'
+    )
+    `).run(recoveredAt);
+    database.prepare(`
+    UPDATE workflow_candidates
+    SET status = 'failed', error_code = 'generation_interrupted',
+        error_message = 'Full Generation was interrupted and can be resumed.',
+        updated_at = ?
+    WHERE status = 'running'
+    `).run(recoveredAt);
+  }
   const imageGeneration = options.imageGeneration ?? {
     async generateConceptScreen() {
       throw new GenerationBoundaryError(
@@ -444,9 +533,17 @@ export async function openWorkflowService(
   }>();
   const activeDesignBriefRuns = new Set<string>();
   const activePrdRuns = new Set<string>();
+  const activeFullRuns = new Map<string, {
+    candidateId: string;
+    cancelRequested: boolean;
+  }>();
   const conceptProgressListeners = new Map<
     string,
     Set<(event: ConceptScreenProgressEvent) => void>
+  >();
+  const fullProgressListeners = new Map<
+    string,
+    Set<(event: FullGenerationProgressEvent) => void>
   >();
   function emitConceptProgress(event: ConceptScreenProgressEvent): void {
     for (const listener of conceptProgressListeners.get(event.projectId) ?? []) {
@@ -492,6 +589,16 @@ export async function openWorkflowService(
     return configuration as ConfigurationRow & { image_quality: ImageQuality };
   }
 
+  function emitFullProgress(event: FullGenerationProgressEvent): void {
+    for (const listener of fullProgressListeners.get(event.projectId) ?? []) {
+      try {
+        listener(event);
+      } catch {
+        // A disconnected observer must never interrupt an atomic Candidate Workflow.
+      }
+    }
+  }
+
   function prdConfiguration(): ConfigurationRow {
     const configuration = database.prepare(`
       SELECT prompt, model, image_quality, updated_at
@@ -502,6 +609,75 @@ export async function openWorkflowService(
       throw new Error('PRD Stage Configuration is missing');
     }
     return configuration;
+  }
+
+  function candidateRow(projectId: string): CandidateRow | undefined {
+    return database.prepare(`
+      SELECT * FROM workflow_candidates WHERE project_id = ?
+    `).get(projectId) as unknown as CandidateRow | undefined;
+  }
+
+  function requireCandidate(projectId: string, candidateId?: string): CandidateRow {
+    const candidate = candidateRow(projectId);
+    if (!candidate || (candidateId && candidate.id !== candidateId)) {
+      throw new WorkflowValidationError('No matching Candidate Workflow is available.');
+    }
+    return candidate;
+  }
+
+  function candidateConfigurations(candidate: CandidateRow): CandidateConfigurations {
+    return JSON.parse(candidate.configuration_json) as CandidateConfigurations;
+  }
+
+  function assertGenerationAvailable(projectId: string, candidateId?: string): void {
+    const fullRun = activeFullRuns.get(projectId);
+    if (fullRun && fullRun.candidateId !== candidateId) {
+      throw new WorkflowValidationError(
+        'Full Generation is already running for this Project.',
+      );
+    }
+    const candidate = candidateRow(projectId);
+    if (candidate && candidate.id !== candidateId) {
+      throw new WorkflowValidationError(
+        'Resume or discard the existing Candidate Workflow first.',
+      );
+    }
+  }
+
+  function updateCandidate(
+    candidateId: string,
+    values: {
+      status?: CandidateWorkflow['status'];
+      currentStage?: CandidateWorkflow['currentStage'];
+      completedOperationCount?: number;
+      warnings?: CandidateWarning[];
+      error?: { code: string; message: string } | null;
+    },
+  ): void {
+    const updatedAt = now().toISOString();
+    database.prepare(`
+      UPDATE workflow_candidates
+      SET status = COALESCE(?, status),
+          current_stage = COALESCE(?, current_stage),
+          completed_operation_count = COALESCE(?, completed_operation_count),
+          warnings_json = CASE WHEN ? IS NULL THEN warnings_json ELSE ? END,
+          error_code = CASE WHEN ? = 0 THEN error_code ELSE ? END,
+          error_message = CASE WHEN ? = 0 THEN error_message ELSE ? END,
+          updated_at = ?
+      WHERE id = ?
+    `).run(
+      values.status ?? null,
+      values.currentStage ?? null,
+      values.completedOperationCount ?? null,
+      values.warnings === undefined ? null : 1,
+      values.warnings === undefined ? null : JSON.stringify(values.warnings),
+      values.error === undefined ? 0 : 1,
+      values.error?.code ?? null,
+      values.error === undefined ? 0 : 1,
+      values.error?.message ?? null,
+      updatedAt,
+      candidateId,
+    );
   }
 
   function conceptOperations(runId: string): ConceptOperationRow[] {
@@ -554,6 +730,113 @@ export async function openWorkflowService(
     return database.prepare(
       'SELECT * FROM stage_runs WHERE id = ?',
     ).get(runId) as unknown as RunRow | undefined;
+  }
+
+  function emitCandidateProgress(
+    candidate: CandidateRow,
+    phase: FullGenerationProgressEvent['phase'],
+    currentStage: FullGenerationProgressEvent['currentStage'],
+    currentOrdinal: ConceptScreenOrdinal | null,
+    completedOperationCount: number,
+  ): void {
+    emitFullProgress({
+      projectId: candidate.project_id,
+      candidateId: candidate.id,
+      phase,
+      currentStage,
+      currentOrdinal,
+      completedOperationCount,
+      totalOperationCount: 5,
+      elapsedMs: Math.max(0, now().getTime() - new Date(candidate.started_at).getTime()),
+    });
+  }
+
+  function candidateWarnings(candidate: CandidateRow): CandidateWarning[] {
+    const artifacts = database.prepare(`
+      SELECT stage_id, validation_json
+      FROM artifacts
+      WHERE id IN (?, ?, ?)
+      ORDER BY CASE stage_id
+        WHEN 'design_brief' THEN 1
+        WHEN 'concept_screens' THEN 2
+        WHEN 'prd' THEN 3
+      END
+    `).all(
+      candidate.design_brief_artifact_id,
+      candidate.concept_screen_artifact_id,
+      candidate.prd_artifact_id,
+    ) as unknown as Array<{ stage_id: CandidateWarning['stageId']; validation_json: string }>;
+    return artifacts.flatMap((artifact) => {
+      const validation = JSON.parse(artifact.validation_json) as {
+        warnings?: Array<{ code: string; message: string }>;
+      };
+      return (validation.warnings ?? []).map((warning) => ({
+        stageId: artifact.stage_id,
+        code: warning.code,
+        message: warning.message,
+      }));
+    });
+  }
+
+  function promoteCandidate(candidate: CandidateRow): ProjectWorkflow {
+    if (
+      !candidate.design_brief_artifact_id
+      || !candidate.concept_screen_artifact_id
+      || !candidate.prd_artifact_id
+    ) {
+      throw new WorkflowValidationError('The Candidate Workflow is not complete.');
+    }
+    const project = requireProject(candidate.project_id);
+    if (project.insight_source !== candidate.insight_source) {
+      throw new WorkflowValidationError(
+        'The Insight Source changed while Full Generation was running.',
+      );
+    }
+    emitCandidateProgress(candidate, 'promoting', 'promotion', null, 5);
+    database.exec('BEGIN IMMEDIATE;');
+    try {
+      const setCurrent = database.prepare(`
+        INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
+        VALUES (?, ?, ?)
+        ON CONFLICT(project_id, stage_id) DO UPDATE SET artifact_id = excluded.artifact_id
+      `);
+      setCurrent.run(candidate.project_id, 'design_brief', candidate.design_brief_artifact_id);
+      setCurrent.run(candidate.project_id, 'concept_screens', candidate.concept_screen_artifact_id);
+      setCurrent.run(candidate.project_id, 'prd', candidate.prd_artifact_id);
+      database.prepare('DELETE FROM pending_cascades WHERE project_id = ?')
+        .run(candidate.project_id);
+      database.prepare('DELETE FROM workflow_candidates WHERE id = ?').run(candidate.id);
+      database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
+        .run(now().toISOString(), candidate.project_id);
+      database.exec('COMMIT;');
+    } catch (error) {
+      database.exec('ROLLBACK;');
+      throw error;
+    }
+    emitCandidateProgress(candidate, 'completed', null, null, 5);
+    return readProjectWorkflow(candidate.project_id);
+  }
+
+  function finishCandidate(candidateId: string): ProjectWorkflow {
+    const candidate = requireCandidate(
+      (database.prepare('SELECT project_id FROM workflow_candidates WHERE id = ?')
+        .get(candidateId) as unknown as { project_id: string }).project_id,
+      candidateId,
+    );
+    const warnings = candidateWarnings(candidate);
+    if (warnings.length > 0) {
+      updateCandidate(candidate.id, {
+        status: 'awaiting_warning_review',
+        currentStage: 'promotion',
+        completedOperationCount: 5,
+        warnings,
+        error: null,
+      });
+      const updated = requireCandidate(candidate.project_id, candidate.id);
+      emitCandidateProgress(updated, 'awaiting_warning_review', 'promotion', null, 5);
+      return readProjectWorkflow(candidate.project_id);
+    }
+    return promoteCandidate(candidate);
   }
 
   function readProjectWorkflow(projectId: string): ProjectWorkflow {
@@ -611,8 +894,18 @@ export async function openWorkflowService(
     `).get(projectId) as unknown as RunRow | undefined;
     const hasInsight = project.insight_source.trim().length > 0;
     const hasPrd = Boolean(prdArtifact);
+    const candidate = candidateRow(projectId);
     return {
       projectId,
+      canGenerateFullWorkflow: hasInsight && !candidate,
+      fullGenerationBlocker: !hasInsight
+        ? 'Add an Insight Source before starting Full Generation.'
+        : candidate
+          ? candidate.status === 'awaiting_warning_review'
+            ? 'Review the Candidate Workflow warnings before promotion.'
+            : 'Resume or discard the existing Candidate Workflow first.'
+          : null,
+      candidate: candidateFromRow(candidate),
       canGenerateDesignBrief: hasInsight && !hasPrd,
       generationBlocker: !hasInsight
         ? 'Add an Insight Source before generating a Design Brief.'
@@ -657,12 +950,65 @@ export async function openWorkflowService(
     };
   }
 
+  async function continueFullCandidate(candidate: CandidateRow): Promise<ProjectWorkflow> {
+    activeFullRuns.set(candidate.project_id, {
+      candidateId: candidate.id,
+      cancelRequested: false,
+    });
+    updateCandidate(candidate.id, { status: 'running', error: null });
+    try {
+      if (!candidate.design_brief_artifact_id) {
+        return await service.generateDesignBrief(candidate.project_id, candidate.id);
+      }
+      if (!candidate.concept_screen_artifact_id) {
+        return await service.generateConceptScreens(candidate.project_id, candidate.id);
+      }
+      if (!candidate.prd_artifact_id) {
+        return await service.generatePrd(candidate.project_id, candidate.id);
+      }
+      return finishCandidate(candidate.id);
+    } catch (error) {
+      const cancellation = error instanceof WorkflowCancellationError
+        || (error instanceof WorkflowGenerationError && error.code === 'cancelled');
+      const code = cancellation
+        ? 'cancelled'
+        : error instanceof WorkflowGenerationError
+          ? error.code
+          : error instanceof WorkflowValidationError
+            ? 'invalid_artifact'
+            : 'generation_failed';
+      const message = error instanceof Error
+        ? error.message
+        : 'Full Generation failed.';
+      const current = candidateRow(candidate.project_id);
+      if (current?.id === candidate.id) {
+        updateCandidate(candidate.id, {
+          status: cancellation ? 'cancelled' : 'failed',
+          error: { code, message },
+        });
+        emitCandidateProgress(
+          current,
+          cancellation ? 'cancelled' : 'failed',
+          current.current_stage,
+          null,
+          current.completed_operation_count,
+        );
+      }
+      if (error instanceof WorkflowGenerationError) throw error;
+      throw new WorkflowGenerationError(code, message);
+    } finally {
+      activeFullRuns.delete(candidate.project_id);
+    }
+  }
+
   const service: WorkflowService = {
     getProjectWorkflow(projectId) {
       return readProjectWorkflow(projectId);
     },
 
-    async generateDesignBrief(projectId) {
+    async generateDesignBrief(projectId, candidateId) {
+      assertGenerationAvailable(projectId, candidateId);
+      const candidate = candidateId ? requireCandidate(projectId, candidateId) : null;
       const project = requireProject(projectId);
       if (activeDesignBriefRuns.has(projectId)) {
         throw new WorkflowValidationError(
@@ -684,13 +1030,15 @@ export async function openWorkflowService(
           'Add an Insight Source before generating a Design Brief.',
         );
       }
-      if (hasCurrentPrd(projectId)) {
+      if (!candidate && hasCurrentPrd(projectId)) {
         throw new WorkflowValidationError(
           'Regenerate the complete downstream workflow to replace a current PRD consistently.',
         );
       }
-      const configuration = designBriefConfiguration();
-      const requiresDownstreamCascade = Boolean(database.prepare(`
+      const configuration = candidate
+        ? candidateConfigurations(candidate).designBrief
+        : designBriefConfiguration();
+      const requiresDownstreamCascade = Boolean(candidate) || Boolean(database.prepare(`
         SELECT 1
         FROM current_artifacts
         WHERE project_id = ? AND stage_id = 'concept_screens'
@@ -720,6 +1068,14 @@ export async function openWorkflowService(
         project.insight_source,
         assembledRequest,
       );
+      if (candidate) {
+        database.prepare(`
+          UPDATE workflow_candidates
+          SET design_brief_run_id = ?, current_stage = 'design_brief', updated_at = ?
+          WHERE id = ?
+        `).run(runId, now().toISOString(), candidate.id);
+        emitCandidateProgress(candidate, 'generating', 'design_brief', null, 0);
+      }
 
       let generated: DesignBriefGenerationResult;
       let validation: ArtifactValidation;
@@ -804,6 +1160,14 @@ export async function openWorkflowService(
           database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
             .run(completedAt.toISOString(), projectId);
         }
+        if (candidate) {
+          database.prepare(`
+            UPDATE workflow_candidates
+            SET design_brief_artifact_id = ?, completed_operation_count = 1,
+                current_stage = 'concept_screens', updated_at = ?
+            WHERE id = ?
+          `).run(artifactId, completedAt.toISOString(), candidate.id);
+        }
         database.exec('COMMIT;');
       } catch (error) {
         database.exec('ROLLBACK;');
@@ -820,7 +1184,10 @@ export async function openWorkflowService(
           design_brief_artifact_id = excluded.design_brief_artifact_id,
           created_at = excluded.created_at
       `).run(projectId, artifactId, completedAt.toISOString());
-      return service.generateConceptScreens(projectId);
+      if (candidate && activeFullRuns.get(projectId)?.cancelRequested) {
+        throw new WorkflowCancellationError();
+      }
+      return service.generateConceptScreens(projectId, candidate?.id);
     },
 
     getConceptScreenAsset(projectId, assetId) {
@@ -975,7 +1342,9 @@ export async function openWorkflowService(
       };
     },
 
-    async generateConceptScreens(projectId) {
+    async generateConceptScreens(projectId, candidateId) {
+      assertGenerationAvailable(projectId, candidateId);
+      const candidate = candidateId ? requireCandidate(projectId, candidateId) : null;
       requireProject(projectId);
       if (activeDesignBriefRuns.has(projectId)) {
         throw new WorkflowValidationError(
@@ -987,7 +1356,7 @@ export async function openWorkflowService(
           'PRD generation is already running for this Project.',
         );
       }
-      if (hasCurrentPrd(projectId)) {
+      if (!candidate && hasCurrentPrd(projectId)) {
         throw new WorkflowValidationError(
           'Regenerate the PRD with any new Concept Screen Set to keep the workflow consistent.',
         );
@@ -1013,7 +1382,9 @@ export async function openWorkflowService(
           'Generate a Design Brief before generating Concept Screens.',
         );
       }
-      const configuration = conceptScreenConfiguration();
+      const configuration = candidate
+        ? candidateConfigurations(candidate).conceptScreens
+        : conceptScreenConfiguration();
       const assembledRequest = [
         'Stage Prompt:',
         configuration.prompt,
@@ -1093,6 +1464,13 @@ export async function openWorkflowService(
           settingsJson,
         );
       }
+      if (candidate) {
+        database.prepare(`
+          UPDATE workflow_candidates
+          SET concept_screen_run_id = ?, current_stage = 'concept_screens', updated_at = ?
+          WHERE id = ?
+        `).run(runId, now().toISOString(), candidate.id);
+      }
       const completed: Array<{
         ordinal: ConceptScreenOrdinal;
         assetId: string;
@@ -1144,6 +1522,15 @@ export async function openWorkflowService(
               operationStartedAt.getTime() - attemptStartedAt.getTime(),
             ),
           });
+          if (candidate) {
+            emitCandidateProgress(
+              candidate,
+              'generating',
+              'concept_screens',
+              ordinal,
+              1 + completed.length,
+            );
+          }
           database.prepare(`
             INSERT INTO concept_screen_operations (
               run_id, ordinal, status, started_at
@@ -1225,6 +1612,13 @@ export async function openWorkflowService(
             throw error;
           }
           completed.push({ ordinal, assetId, png: generated.png, ...dimensions });
+          if (candidate) {
+            database.prepare(`
+              UPDATE workflow_candidates
+              SET completed_operation_count = ?, updated_at = ?
+              WHERE id = ?
+            `).run(1 + completed.length, operationCompletedAt.toISOString(), candidate.id);
+          }
           activeOperationIdentifiers = null;
         }
 
@@ -1280,25 +1674,34 @@ export async function openWorkflowService(
             completedAt.toISOString(),
             JSON.stringify(validation),
           );
-          database.prepare(`
-            INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
-            VALUES (?, 'concept_screens', ?)
-            ON CONFLICT(project_id, stage_id) DO UPDATE SET
-              artifact_id = excluded.artifact_id
-          `).run(projectId, artifactId);
-          const designBriefCandidate = pendingDesignBriefCandidate(projectId);
-          if (designBriefCandidate) {
+          if (candidate) {
+            database.prepare(`
+              UPDATE workflow_candidates
+              SET concept_screen_artifact_id = ?, completed_operation_count = 4,
+                  current_stage = 'prd', updated_at = ?
+              WHERE id = ?
+            `).run(artifactId, completedAt.toISOString(), candidate.id);
+          } else {
             database.prepare(`
               INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
-              VALUES (?, 'design_brief', ?)
+              VALUES (?, 'concept_screens', ?)
               ON CONFLICT(project_id, stage_id) DO UPDATE SET
                 artifact_id = excluded.artifact_id
-            `).run(projectId, designBriefCandidate.id);
-            database.prepare('DELETE FROM pending_cascades WHERE project_id = ?')
-              .run(projectId);
+            `).run(projectId, artifactId);
+            const designBriefCandidate = pendingDesignBriefCandidate(projectId);
+            if (designBriefCandidate) {
+              database.prepare(`
+                INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
+                VALUES (?, 'design_brief', ?)
+                ON CONFLICT(project_id, stage_id) DO UPDATE SET
+                  artifact_id = excluded.artifact_id
+              `).run(projectId, designBriefCandidate.id);
+              database.prepare('DELETE FROM pending_cascades WHERE project_id = ?')
+                .run(projectId);
+            }
+            database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
+              .run(completedAt.toISOString(), projectId);
           }
-          database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
-            .run(completedAt.toISOString(), projectId);
           database.exec('COMMIT;');
           emitConceptProgress({
             projectId,
@@ -1381,10 +1784,18 @@ export async function openWorkflowService(
       }
 
       activeConceptRuns.delete(projectId);
+      if (candidate) {
+        if (activeFullRuns.get(projectId)?.cancelRequested) {
+          throw new WorkflowCancellationError();
+        }
+        return service.generatePrd(projectId, candidate.id);
+      }
       return readProjectWorkflow(projectId);
     },
 
-    async generatePrd(projectId) {
+    async generatePrd(projectId, candidateId) {
+      assertGenerationAvailable(projectId, candidateId);
+      const candidate = candidateId ? requireCandidate(projectId, candidateId) : null;
       requireProject(projectId);
       if (activeDesignBriefRuns.has(projectId)) {
         throw new WorkflowValidationError(
@@ -1401,27 +1812,37 @@ export async function openWorkflowService(
           'Concept Screen generation is already running for this Project.',
         );
       }
-      if (pendingDesignBriefCandidate(projectId)) {
+      if (!candidate && pendingDesignBriefCandidate(projectId)) {
         throw new WorkflowValidationError(
           'Finish or resume the pending downstream cascade before generating a PRD.',
         );
       }
       activePrdRuns.add(projectId);
       try {
-      const designBrief = database.prepare(`
+      const designBrief = (candidate
+        ? database.prepare(`
+          SELECT id, project_id, run_id, markdown, created_at, validation_json
+          FROM artifacts WHERE id = ? AND project_id = ? AND stage_id = 'design_brief'
+        `).get(candidate.design_brief_artifact_id, projectId)
+        : database.prepare(`
         SELECT artifact.id, artifact.project_id, artifact.run_id,
                artifact.markdown, artifact.created_at, artifact.validation_json
         FROM current_artifacts AS current
         JOIN artifacts AS artifact ON artifact.id = current.artifact_id
         WHERE current.project_id = ? AND current.stage_id = 'design_brief'
-      `).get(projectId) as unknown as ArtifactRow | undefined;
-      const conceptScreenSet = database.prepare(`
+      `).get(projectId)) as unknown as ArtifactRow | undefined;
+      const conceptScreenSet = (candidate
+        ? database.prepare(`
+          SELECT id, project_id, run_id, created_at, validation_json
+          FROM artifacts WHERE id = ? AND project_id = ? AND stage_id = 'concept_screens'
+        `).get(candidate.concept_screen_artifact_id, projectId)
+        : database.prepare(`
         SELECT artifact.id, artifact.project_id, artifact.run_id,
                artifact.created_at, artifact.validation_json
         FROM current_artifacts AS current
         JOIN artifacts AS artifact ON artifact.id = current.artifact_id
         WHERE current.project_id = ? AND current.stage_id = 'concept_screens'
-      `).get(projectId) as unknown as ConceptArtifactRow | undefined;
+      `).get(projectId)) as unknown as ConceptArtifactRow | undefined;
       if (!designBrief || !conceptScreenSet) {
         throw new WorkflowValidationError(
           'Generate a Design Brief and Concept Screen Set before generating a PRD.',
@@ -1436,7 +1857,9 @@ export async function openWorkflowService(
           'The current Concept Screen Set does not contain three usable PNGs.',
         );
       }
-      const configuration = prdConfiguration();
+      const configuration = candidate
+        ? candidateConfigurations(candidate).prd
+        : prdConfiguration();
       const stageInput: PrdRun['stageInput'] = {
         designBrief: {
           value: designBrief.markdown,
@@ -1487,6 +1910,14 @@ export async function openWorkflowService(
         JSON.stringify(stageInput),
         assembledRequest,
       );
+      if (candidate) {
+        database.prepare(`
+          UPDATE workflow_candidates
+          SET prd_run_id = ?, current_stage = 'prd', updated_at = ?
+          WHERE id = ?
+        `).run(runId, now().toISOString(), candidate.id);
+        emitCandidateProgress(candidate, 'generating', 'prd', null, 4);
+      }
 
       let generated: PrdGenerationResult;
       let validation: ArtifactValidation;
@@ -1541,10 +1972,10 @@ export async function openWorkflowService(
           FROM current_artifacts
           WHERE project_id = ? AND stage_id = 'concept_screens'
         `).get(projectId) as unknown as { artifact_id: string } | undefined;
-        if (
+        if (!candidate && (
           currentDesignBrief?.artifact_id !== designBrief.id
           || currentConceptScreenSet?.artifact_id !== conceptScreenSet.id
-        ) {
+        )) {
           throw new WorkflowValidationError(
             'PRD inputs changed before promotion; run the stage again with the current workflow.',
           );
@@ -1575,14 +2006,23 @@ export async function openWorkflowService(
           completedAt.toISOString(),
           JSON.stringify(validation),
         );
-        database.prepare(`
-          INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
-          VALUES (?, 'prd', ?)
-          ON CONFLICT(project_id, stage_id) DO UPDATE SET
-            artifact_id = excluded.artifact_id
-        `).run(projectId, artifactId);
-        database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
-          .run(completedAt.toISOString(), projectId);
+        if (candidate) {
+          database.prepare(`
+            UPDATE workflow_candidates
+            SET prd_artifact_id = ?, completed_operation_count = 5,
+                current_stage = 'promotion', updated_at = ?
+            WHERE id = ?
+          `).run(artifactId, completedAt.toISOString(), candidate.id);
+        } else {
+          database.prepare(`
+            INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
+            VALUES (?, 'prd', ?)
+            ON CONFLICT(project_id, stage_id) DO UPDATE SET
+              artifact_id = excluded.artifact_id
+          `).run(projectId, artifactId);
+          database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
+            .run(completedAt.toISOString(), projectId);
+        }
         database.exec('COMMIT;');
       } catch (error) {
         database.exec('ROLLBACK;');
@@ -1607,10 +2047,139 @@ export async function openWorkflowService(
         );
         throw new WorkflowGenerationError(code, message);
       }
+      if (candidate) {
+        if (activeFullRuns.get(projectId)?.cancelRequested) {
+          throw new WorkflowCancellationError();
+        }
+        emitCandidateProgress(candidate, 'validating', 'promotion', null, 5);
+        return finishCandidate(candidate.id);
+      }
       return readProjectWorkflow(projectId);
       } finally {
         activePrdRuns.delete(projectId);
       }
+    },
+
+    async generateFullWorkflow(projectId) {
+      const project = requireProject(projectId);
+      if (!project.insight_source.trim()) {
+        throw new WorkflowValidationError(
+          'Add an Insight Source before starting Full Generation.',
+        );
+      }
+      if (candidateRow(projectId)) {
+        throw new WorkflowValidationError(
+          'Resume or discard the existing Candidate Workflow first.',
+        );
+      }
+      if (
+        activeDesignBriefRuns.has(projectId)
+        || activeConceptRuns.has(projectId)
+        || activePrdRuns.has(projectId)
+        || activeFullRuns.has(projectId)
+      ) {
+        throw new WorkflowValidationError(
+          'Generation is already running for this Project.',
+        );
+      }
+      if (pendingDesignBriefCandidate(projectId)) {
+        throw new WorkflowValidationError(
+          'Finish the pending guided cascade before starting Full Generation.',
+        );
+      }
+      const candidateId = randomUUID();
+      const startedAt = now().toISOString();
+      const configurations: CandidateConfigurations = {
+        designBrief: designBriefConfiguration(),
+        conceptScreens: conceptScreenConfiguration(),
+        prd: prdConfiguration(),
+      };
+      database.prepare(`
+        INSERT INTO workflow_candidates (
+          id, project_id, status, current_stage, completed_operation_count,
+          insight_source, configuration_json, started_at, updated_at
+        ) VALUES (?, ?, 'running', 'design_brief', 0, ?, ?, ?, ?)
+      `).run(
+        candidateId,
+        projectId,
+        project.insight_source,
+        JSON.stringify(configurations),
+        startedAt,
+        startedAt,
+      );
+      return continueFullCandidate(requireCandidate(projectId, candidateId));
+    },
+
+    async resumeFullWorkflow(projectId) {
+      requireProject(projectId);
+      const candidate = requireCandidate(projectId);
+      if (candidate.status !== 'failed' && candidate.status !== 'cancelled') {
+        throw new WorkflowValidationError(
+          'Only a failed or cancelled Candidate Workflow can be resumed.',
+        );
+      }
+      if (activeFullRuns.has(projectId)) {
+        throw new WorkflowValidationError(
+          'Full Generation is already running for this Project.',
+        );
+      }
+      return continueFullCandidate(candidate);
+    },
+
+    promoteFullWorkflow(projectId) {
+      requireProject(projectId);
+      const candidate = requireCandidate(projectId);
+      if (candidate.status !== 'awaiting_warning_review') {
+        throw new WorkflowValidationError(
+          'The Candidate Workflow is not awaiting warning review.',
+        );
+      }
+      return promoteCandidate(candidate);
+    },
+
+    async discardFullWorkflow(projectId) {
+      requireProject(projectId);
+      const candidate = requireCandidate(projectId);
+      if (activeFullRuns.has(projectId)) {
+        throw new WorkflowValidationError(
+          'Cancel Full Generation before discarding its Candidate Workflow.',
+        );
+      }
+      const runIds = [
+        candidate.design_brief_run_id,
+        candidate.concept_screen_run_id,
+        candidate.prd_run_id,
+      ].filter((value): value is string => Boolean(value));
+      const assetPaths = runIds.length === 0
+        ? []
+        : database.prepare(`
+          SELECT relative_path FROM binary_assets
+          WHERE run_id IN (${runIds.map(() => '?').join(', ')})
+        `).all(...runIds) as unknown as Array<{ relative_path: string }>;
+      database.exec('BEGIN IMMEDIATE;');
+      try {
+        database.prepare('DELETE FROM workflow_candidates WHERE id = ?').run(candidate.id);
+        database.prepare('DELETE FROM pending_cascades WHERE project_id = ?').run(projectId);
+        const deleteRun = database.prepare('DELETE FROM stage_runs WHERE id = ?');
+        runIds.forEach((runId) => deleteRun.run(runId));
+        database.exec('COMMIT;');
+      } catch (error) {
+        database.exec('ROLLBACK;');
+        throw error;
+      }
+      await Promise.all(assetPaths.map(({ relative_path: relativePath }) =>
+        unlink(join(dataDirectory, relativePath)).catch(() => undefined)));
+      return readProjectWorkflow(projectId);
+    },
+
+    cancelFullWorkflow(projectId) {
+      requireProject(projectId);
+      const active = activeFullRuns.get(projectId);
+      if (!active) return false;
+      active.cancelRequested = true;
+      const conceptRun = activeConceptRuns.get(projectId);
+      if (conceptRun) conceptRun.cancelRequested = true;
+      return true;
     },
 
     cancelConceptScreens(projectId) {
@@ -1629,6 +2198,17 @@ export async function openWorkflowService(
       return () => {
         listeners.delete(listener);
         if (listeners.size === 0) conceptProgressListeners.delete(projectId);
+      };
+    },
+
+    subscribeFullGenerationProgress(projectId, listener) {
+      requireProject(projectId);
+      const listeners = fullProgressListeners.get(projectId) ?? new Set();
+      listeners.add(listener);
+      fullProgressListeners.set(projectId, listeners);
+      return () => {
+        listeners.delete(listener);
+        if (listeners.size === 0) fullProgressListeners.delete(projectId);
       };
     },
 

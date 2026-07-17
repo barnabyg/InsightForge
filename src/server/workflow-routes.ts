@@ -131,6 +131,93 @@ export function registerWorkflowRoutes(
   );
 
   app.get<{ Params: ProjectParameters }>(
+    '/api/projects/:id/full-generations/events',
+    (request, reply) => {
+      try {
+        workflows.getProjectWorkflow(request.params.id);
+        reply.hijack();
+        reply.raw.writeHead(200, {
+          'content-type': 'text/event-stream',
+          'cache-control': 'no-cache, no-transform',
+          connection: 'keep-alive',
+        });
+        reply.raw.write(': connected\n\n');
+        const unsubscribe = workflows.subscribeFullGenerationProgress(
+          request.params.id,
+          (event) => reply.raw.write(`data: ${JSON.stringify(event)}\n\n`),
+        );
+        request.raw.once('close', unsubscribe);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: ProjectParameters }>(
+    '/api/projects/:id/full-generations',
+    async (request, reply) => {
+      try {
+        await options.beforeGeneration?.();
+        const workflow = await workflows.generateFullWorkflow(request.params.id);
+        return reply.status(201).send(workflow);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: ProjectParameters }>(
+    '/api/projects/:id/full-generations/resume',
+    async (request, reply) => {
+      try {
+        await options.beforeGeneration?.();
+        return await workflows.resumeFullWorkflow(request.params.id);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.post<{ Params: ProjectParameters }>(
+    '/api/projects/:id/full-generations/promotion',
+    async (request, reply) => {
+      try {
+        return workflows.promoteFullWorkflow(request.params.id);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.delete<{ Params: ProjectParameters }>(
+    '/api/projects/:id/full-generations/active',
+    async (request, reply) => {
+      try {
+        const cancelled = workflows.cancelFullWorkflow(request.params.id);
+        return cancelled
+          ? reply.status(202).send({ state: 'cancelling' })
+          : reply.status(409).send({
+              code: 'no_active_generation',
+              error: 'No Full Generation is active.',
+            });
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.delete<{ Params: ProjectParameters }>(
+    '/api/projects/:id/full-generations/candidate',
+    async (request, reply) => {
+      try {
+        return await workflows.discardFullWorkflow(request.params.id);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
+  app.get<{ Params: ProjectParameters }>(
     '/api/projects/:id/deliverables',
     async (request, reply) => {
       try {

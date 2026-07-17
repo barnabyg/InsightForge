@@ -32,6 +32,7 @@ export function ProjectWorkspace({
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [confirmCascade, setConfirmCascade] = useState(false);
+  const [confirmFullGeneration, setConfirmFullGeneration] = useState(false);
   const [importError, setImportError] = useState<string | null>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const workflow = useProjectWorkflow(project.id);
@@ -175,7 +176,19 @@ export function ProjectWorkspace({
       : workflow.workflow?.conceptScreenSet
         ? 'Ready'
         : 'Waiting';
-  const insightLocked = Boolean(workflow.workflow?.designBrief);
+  const insightLocked = Boolean(
+    workflow.workflow?.designBrief
+    || workflow.workflow?.candidate
+    || workflow.generatingStage === 'full_generation',
+  );
+  const fullProgress = workflow.fullGenerationProgress;
+  const candidate = workflow.workflow?.candidate;
+  const fullStageName = {
+    design_brief: 'Design Brief',
+    concept_screens: 'Concept Screens',
+    prd: 'PRD',
+    promotion: 'promotion',
+  }[fullProgress?.currentStage ?? candidate?.currentStage ?? 'design_brief'];
 
   return (
     <div className={styles['project-workspace']}>
@@ -283,6 +296,98 @@ export function ProjectWorkspace({
               </p>
             )}
             {importError && <p className={styles['inline-error']} role="alert">{importError}</p>}
+          </section>
+
+          {workflow.error && (
+            <div className={styles['workspace-error']} role="alert">
+              <span>{workflow.error}</span>
+              <button type="button" onClick={workflow.clearError}>Dismiss</button>
+            </div>
+          )}
+
+          <section className={styles['full-generation-card']} aria-label="Full Generation">
+            <div className={styles['full-generation-heading']}>
+              <div>
+                <p className={styles.eyebrow}>One-pass workflow</p>
+                <h2>Generate the complete workflow</h2>
+                <p>One Design Brief request, three sequential Concept Screens, and one PRD request. Current artifacts change only after the complete Candidate Workflow succeeds.</p>
+              </div>
+              {!candidate && workflow.generatingStage !== 'full_generation' && (
+                <button
+                  className={styles['primary-action']}
+                  type="button"
+                  disabled={!insight.trim() || saveState === 'saving'}
+                  onClick={() => setConfirmFullGeneration(true)}
+                >Generate complete workflow</button>
+              )}
+            </div>
+
+            {workflow.generatingStage === 'full_generation' && (
+              <div
+                className={styles['full-generation-progress']}
+                role="status"
+                aria-label="Generating complete workflow"
+                aria-live="polite"
+              >
+                <div>
+                  <strong>{fullStageName}{fullProgress?.currentOrdinal ? ` · Screen ${fullProgress.currentOrdinal} of 3` : ''}</strong>
+                  <span>{fullProgress?.completedOperationCount ?? candidate?.completedOperationCount ?? 0} of 5 operations complete · {elapsedSeconds}s elapsed</span>
+                </div>
+                <progress value={fullProgress?.completedOperationCount ?? candidate?.completedOperationCount ?? 0} max={5} />
+                <button
+                  className={styles['secondary-action']}
+                  type="button"
+                  disabled={workflow.cancelling}
+                  onClick={() => void workflow.cancelFullWorkflow().catch(() => undefined)}
+                >{workflow.cancelling ? 'Cancelling…' : 'Cancel after current operation'}</button>
+              </div>
+            )}
+
+            {candidate && workflow.generatingStage !== 'full_generation' && (
+              <div className={styles['candidate-summary']} role="status">
+                <div>
+                  <strong>
+                    {candidate.status === 'awaiting_warning_review'
+                      ? 'Candidate ready for warning review'
+                      : candidate.status === 'running'
+                        ? 'Candidate generation continues'
+                      : candidate.status === 'cancelled'
+                        ? 'Candidate cancelled safely'
+                        : 'Candidate generation failed'}
+                  </strong>
+                  <span>{candidate.completedOperationCount} of 5 operations complete · {candidate.status === 'running' ? 'currently at' : 'stopped at'} {fullStageName}</span>
+                  {candidate.error && <p>{candidate.error.message}</p>}
+                </div>
+                {candidate.warnings.length > 0 && (
+                  <div className={styles['candidate-warnings']}>
+                    <strong>{candidate.warnings.length} sanity {candidate.warnings.length === 1 ? 'warning' : 'warnings'}</strong>
+                    <ul>{candidate.warnings.map((warning) => (
+                      <li key={`${warning.stageId}-${warning.code}`}>{warning.message}</li>
+                    ))}</ul>
+                  </div>
+                )}
+                <div className={styles['candidate-actions']}>
+                  {candidate.status === 'running' ? (
+                    <button className={styles['secondary-action']} type="button" onClick={() => {
+                      void workflow.cancelFullWorkflow().catch(() => undefined);
+                    }}>Cancel after current operation</button>
+                  ) : candidate.status === 'awaiting_warning_review' ? (
+                    <button className={styles['primary-action']} type="button" onClick={() => {
+                      void workflow.promoteFullWorkflow().catch(() => undefined);
+                    }}>Promote Candidate Workflow</button>
+                  ) : (
+                    <button className={styles['primary-action']} type="button" onClick={() => {
+                      void workflow.resumeFullWorkflow().catch(() => undefined);
+                    }}>Resume Candidate Workflow</button>
+                  )}
+                  {candidate.status !== 'running' && (
+                    <button className={styles['danger-action']} type="button" onClick={() => {
+                      void workflow.discardFullWorkflow().catch(() => undefined);
+                    }}>Discard Candidate Workflow</button>
+                  )}
+                </div>
+              </div>
+            )}
           </section>
 
           <aside className={styles['iteration-note']}>
@@ -554,6 +659,32 @@ export function ProjectWorkspace({
         >
           <p>This cascade will generate a new Design Brief and then three new Concept Screens.</p>
           <p>The current Design Brief and Concept Screen Set remain available unless the complete cascade succeeds.</p>
+        </Modal>
+      )}
+
+      {confirmFullGeneration && (
+        <Modal
+          title="Generate complete workflow?"
+          onDismiss={() => setConfirmFullGeneration(false)}
+          actions={<>
+            <button className={styles['secondary-action']} type="button" onClick={() => setConfirmFullGeneration(false)}>Cancel</button>
+            <button className={styles['primary-action']} type="button" onClick={() => {
+              setConfirmFullGeneration(false);
+              void (async () => {
+                await flushLatestInsight();
+                await workflow.refresh();
+                await workflow.generateFullWorkflow();
+              })().catch(() => undefined);
+            }}>Start 5 operations</button>
+          </>}
+        >
+          <p>The Candidate Workflow will use:</p>
+          <ul>
+            <li>Design Brief · {workflow.workflow?.designBriefConfiguration.model ?? 'current text model'}</li>
+            <li>Concept Screens · {workflow.workflow?.conceptScreenConfiguration.model ?? 'current image model'} · {workflow.workflow?.conceptScreenConfiguration.imageQuality ?? 'current'} quality</li>
+            <li>PRD · {workflow.workflow?.prdConfiguration.model ?? 'current text model'}</li>
+          </ul>
+          <p>No automatic retry is performed. You can cancel between operations, and the current workflow remains untouched until promotion.</p>
         </Modal>
       )}
     </div>

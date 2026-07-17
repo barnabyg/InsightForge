@@ -120,6 +120,20 @@ export interface DesignBriefArtifact {
   validation: ArtifactValidation;
 }
 
+export type GeneratedStageId = 'design_brief' | 'concept_screens' | 'prd';
+
+export interface FullGenerationProgressEvent {
+  projectId: string;
+  candidateId: string;
+  phase: 'generating' | 'validating' | 'awaiting_warning_review' | 'promoting'
+    | 'completed' | 'failed' | 'cancelled';
+  currentStage: GeneratedStageId | 'promotion' | null;
+  currentOrdinal: ConceptScreenOrdinal | null;
+  completedOperationCount: number;
+  totalOperationCount: 5;
+  elapsedMs: number;
+}
+
 export interface PrdArtifact {
   id: string;
   projectId: string;
@@ -195,8 +209,30 @@ export interface PrdRun {
   } | null;
 }
 
+export interface CandidateWarning {
+  stageId: GeneratedStageId;
+  code: string;
+  message: string;
+}
+
+export interface CandidateWorkflow {
+  id: string;
+  projectId: string;
+  status: 'running' | 'failed' | 'cancelled' | 'awaiting_warning_review';
+  currentStage: GeneratedStageId | 'promotion';
+  completedOperationCount: number;
+  totalOperationCount: 5;
+  startedAt: string;
+  updatedAt: string;
+  warnings: CandidateWarning[];
+  error: { code: string; message: string } | null;
+}
+
 export interface ProjectWorkflow {
   projectId: string;
+  canGenerateFullWorkflow: boolean;
+  fullGenerationBlocker: string | null;
+  candidate: CandidateWorkflow | null;
   canGenerateDesignBrief: boolean;
   generationBlocker: string | null;
   designBrief: DesignBriefArtifact | null;

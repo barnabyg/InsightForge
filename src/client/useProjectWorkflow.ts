@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { ConceptScreenProgressEvent, ProjectWorkflow } from '../shared/generation.js';
+import type {
+  ConceptScreenProgressEvent,
+  FullGenerationProgressEvent,
+  ProjectWorkflow,
+} from '../shared/generation.js';
 
 async function requestWorkflow(url: string, init?: RequestInit): Promise<ProjectWorkflow> {
   const response = await fetch(url, init);
@@ -16,14 +20,20 @@ export interface ProjectWorkflowController {
   workflow: ProjectWorkflow | null;
   loading: boolean;
   generating: boolean;
-  generatingStage: 'design_brief' | 'concept_screens' | 'prd' | null;
+  generatingStage: 'full_generation' | 'design_brief' | 'concept_screens' | 'prd' | null;
   cancelling: boolean;
   conceptScreenProgress: ConceptScreenProgressEvent | null;
+  fullGenerationProgress: FullGenerationProgressEvent | null;
   error: string | null;
   refresh(): Promise<ProjectWorkflow>;
   generateDesignBrief(): Promise<ProjectWorkflow>;
   generateConceptScreens(): Promise<ProjectWorkflow>;
   generatePrd(): Promise<ProjectWorkflow>;
+  generateFullWorkflow(): Promise<ProjectWorkflow>;
+  resumeFullWorkflow(): Promise<ProjectWorkflow>;
+  promoteFullWorkflow(): Promise<ProjectWorkflow>;
+  discardFullWorkflow(): Promise<ProjectWorkflow>;
+  cancelFullWorkflow(): Promise<void>;
   cancelConceptScreens(): Promise<void>;
   clearError(): void;
 }
@@ -31,9 +41,12 @@ export interface ProjectWorkflowController {
 export function useProjectWorkflow(projectId: string): ProjectWorkflowController {
   const [workflow, setWorkflow] = useState<ProjectWorkflow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [generatingStage, setGeneratingStage] = useState<'design_brief' | 'concept_screens' | 'prd' | null>(null);
+  const [generatingStage, setGeneratingStage] = useState<
+    'full_generation' | 'design_brief' | 'concept_screens' | 'prd' | null
+  >(null);
   const [cancelling, setCancelling] = useState(false);
   const [conceptScreenProgress, setConceptScreenProgress] = useState<ConceptScreenProgressEvent | null>(null);
+  const [fullGenerationProgress, setFullGenerationProgress] = useState<FullGenerationProgressEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
@@ -66,6 +79,14 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
     };
   }, [projectId]);
 
+  useEffect(() => {
+    if (workflow?.candidate?.status !== 'running' || generatingStage !== null) return;
+    const timer = window.setInterval(() => {
+      void refresh().catch(() => undefined);
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [generatingStage, refresh, workflow?.candidate?.status]);
+
   return {
     workflow,
     loading,
@@ -73,6 +94,7 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
     generatingStage,
     cancelling,
     conceptScreenProgress,
+    fullGenerationProgress,
     error,
     refresh,
 
@@ -172,8 +194,86 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
       }
     },
 
+    async generateFullWorkflow() {
+      return runFullGeneration(`/api/projects/${projectId}/full-generations`);
+    },
+
+    async resumeFullWorkflow() {
+      return runFullGeneration(`/api/projects/${projectId}/full-generations/resume`);
+    },
+
+    async promoteFullWorkflow() {
+      setError(null);
+      const next = await requestWorkflow(
+        `/api/projects/${projectId}/full-generations/promotion`,
+        { method: 'POST' },
+      );
+      setWorkflow(next);
+      return next;
+    },
+
+    async discardFullWorkflow() {
+      setError(null);
+      const next = await requestWorkflow(
+        `/api/projects/${projectId}/full-generations/candidate`,
+        { method: 'DELETE' },
+      );
+      setWorkflow(next);
+      setFullGenerationProgress(null);
+      return next;
+    },
+
+    async cancelFullWorkflow() {
+      setCancelling(true);
+      const response = await fetch(
+        `/api/projects/${projectId}/full-generations/active`,
+        { method: 'DELETE' },
+      );
+      if (!response.ok) {
+        setCancelling(false);
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        throw new Error(body?.error ?? 'Full Generation could not be cancelled.');
+      }
+    },
+
     clearError() {
       setError(null);
     },
   };
+
+  async function runFullGeneration(url: string): Promise<ProjectWorkflow> {
+    setGeneratingStage('full_generation');
+    setCancelling(false);
+    setFullGenerationProgress(null);
+    setError(null);
+    const progressSource = new EventSource(
+      `/api/projects/${projectId}/full-generations/events`,
+    );
+    progressSource.onmessage = (event) => {
+      setFullGenerationProgress(JSON.parse(event.data) as FullGenerationProgressEvent);
+    };
+    try {
+      await new Promise<void>((resolve) => {
+        const timeout = window.setTimeout(resolve, 1_000);
+        progressSource.onopen = () => {
+          window.clearTimeout(timeout);
+          resolve();
+        };
+      });
+      const next = await requestWorkflow(url, { method: 'POST' });
+      setWorkflow(next);
+      return next;
+    } catch (generationError) {
+      const message = generationError instanceof Error
+        ? generationError.message
+        : 'Full Generation failed.';
+      setError(message);
+      await refresh().catch(() => undefined);
+      throw generationError;
+    } finally {
+      progressSource.close();
+      setGeneratingStage(null);
+      setCancelling(false);
+    }
+  }
 }
