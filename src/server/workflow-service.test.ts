@@ -35,6 +35,14 @@ describe('Workflow service', () => {
     return PNG.sync.write(image);
   }
 
+  function prdNotExpected() {
+    return {
+      async generatePrd(): Promise<never> {
+        throw new Error('PRD generation was not expected in this scenario.');
+      },
+    };
+  }
+
   it('generates, validates, and persists a read-only Design Brief with complete provenance', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);
@@ -59,6 +67,7 @@ describe('Workflow service', () => {
     const workflows = await openWorkflowService(dataDirectory, {
       now: () => times.shift() ?? new Date('2026-07-16T16:01:02.500Z'),
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           return {
             markdown: '# Design Brief\n\n## Problem\n\nInstaller proposals make meaningful comparison difficult.\n\n## Desired outcome\n\nAuthors can identify trade-offs before committing.',
@@ -119,6 +128,7 @@ describe('Workflow service', () => {
     workflowServices.splice(workflowServices.indexOf(workflows), 1);
     const reopened = await openWorkflowService(dataDirectory, {
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           throw new Error('No generation should occur while reading');
         },
@@ -144,6 +154,7 @@ describe('Workflow service', () => {
     const workflows = await openWorkflowService(dataDirectory, {
       now: () => times.shift() ?? new Date('2026-07-16T16:10:01.250Z'),
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           throw new GenerationBoundaryError(
             'openai_refusal',
@@ -196,6 +207,7 @@ describe('Workflow service', () => {
     const imageInputs: Parameters<ImageGenerationBoundary['generateConceptScreen']>[0][] = [];
     const workflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           return {
             markdown: '# Design Brief\n\n## Primary journey\n\nCompare proposals, inspect trade-offs, and record a decision.',
@@ -308,6 +320,7 @@ describe('Workflow service', () => {
     mismatched.data.fill(110);
     const workflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           return {
             markdown: '# Design Brief\n\nA three-step comparison journey.',
@@ -392,6 +405,7 @@ describe('Workflow service', () => {
     const firstCalls: number[] = [];
     const firstWorkflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           briefVersion += 1;
           return {
@@ -440,6 +454,7 @@ describe('Workflow service', () => {
     const resumedCalls: number[] = [];
     const resumedWorkflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           throw new Error('Design Brief regeneration was not expected during resume.');
         },
@@ -483,6 +498,7 @@ describe('Workflow service', () => {
     const pngs = [pngFixture(20), pngFixture(50), pngFixture(80)];
     const workflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           return {
             markdown: '# Design Brief\n\nA three-screen journey.',
@@ -542,6 +558,7 @@ describe('Workflow service', () => {
     portrait.data.fill(160);
     const workflows = await openWorkflowService(dataDirectory, {
       textGeneration: {
+        ...prdNotExpected(),
         async generateDesignBrief() {
           return {
             markdown: '# Design Brief\n\nA coordinated visual journey.',
@@ -587,5 +604,153 @@ describe('Workflow service', () => {
         usage: { inputTokens: 200, outputTokens: 400, totalTokens: 600 },
       },
     });
+  });
+
+  it('generates and persists a read-only PRD from only the current Design Brief and Concept Screen Set', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'ORIGINAL_INSIGHT_MUST_NOT_BE_A_SEPARATE_PRD_INPUT',
+    });
+    const configuration = await openWorkflowConfigurationService(dataDirectory);
+    configuration.commitStageConfiguration('prd', {
+      prompt: 'Create a rigorous PRD that reconciles the brief and all three screens.',
+      model: 'gpt-5.4-mini',
+      imageQuality: null,
+    });
+    configuration.close();
+
+    const designBrief = '# Design Brief\n\n## Primary journey\n\nCompare three options and preserve the reasoning behind the final choice.';
+    const prdMarkdown = '# PRD\n\n## Overview\n\nA focused requirements document reconciles the three concept screens with the authoritative design brief.';
+    const pngs = [pngFixture(45), pngFixture(85), pngFixture(125)];
+    let receivedPrdInput: {
+      model: string;
+      stagePrompt: string;
+      designBrief: string;
+      conceptScreens: Array<{ ordinal: number; png: Uint8Array }>;
+    } | undefined;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        ...prdNotExpected(),
+        async generateDesignBrief() {
+          return {
+            markdown: designBrief,
+            responseId: 'resp_prd_brief',
+            requestId: 'req_prd_brief',
+            usage: { inputTokens: 20, outputTokens: 30, totalTokens: 50 },
+          };
+        },
+        async generatePrd(input) {
+          receivedPrdInput = input;
+          return {
+            markdown: prdMarkdown,
+            responseId: 'resp_prd_01',
+            requestId: 'req_prd_01',
+            usage: { inputTokens: 640, outputTokens: 180, totalTokens: 820 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngs[input.ordinal - 1],
+            requestId: `req_prd_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await workflows.generateDesignBrief(project.id);
+    const withScreens = await workflows.generateConceptScreens(project.id);
+
+    const generated = await workflows.generatePrd(project.id);
+
+    expect(receivedPrdInput).toMatchObject({
+      model: 'gpt-5.4-mini',
+      stagePrompt: 'Create a rigorous PRD that reconciles the brief and all three screens.',
+      designBrief,
+      conceptScreens: [
+        { ordinal: 1 },
+        { ordinal: 2 },
+        { ordinal: 3 },
+      ],
+    });
+    expect(receivedPrdInput).not.toHaveProperty('insightSource');
+    expect(receivedPrdInput?.conceptScreens.map(({ png }) => Buffer.from(png)))
+      .toEqual(pngs);
+    expect(generated.prd).toMatchObject({
+      stageId: 'prd',
+      markdown: prdMarkdown,
+      validation: {
+        status: 'valid_with_warnings',
+        wordCount: 16,
+        warnings: [{
+          code: 'below_recommended_word_count',
+          message: 'PRD is 16 words; the recommended minimum is 250.',
+        }],
+      },
+    });
+    expect(generated.lastPrdRun).toMatchObject({
+      status: 'succeeded',
+      model: 'gpt-5.4-mini',
+      responseId: 'resp_prd_01',
+      requestId: 'req_prd_01',
+      usage: { inputTokens: 640, outputTokens: 180, totalTokens: 820 },
+      stageInput: {
+        designBrief: {
+          artifactId: withScreens.designBrief?.id,
+          runId: withScreens.designBrief?.runId,
+          value: designBrief,
+        },
+        conceptScreenSet: {
+          artifactId: withScreens.conceptScreenSet?.id,
+          runId: withScreens.conceptScreenSet?.runId,
+          screens: withScreens.conceptScreenSet?.screens.map((screen) => ({
+            assetId: screen.assetId,
+            ordinal: screen.ordinal,
+            width: screen.width,
+            height: screen.height,
+          })),
+        },
+      },
+    });
+    expect(generated.lastPrdRun?.assembledRequest).not.toContain(project.insightSource);
+    expect(projects.listProjects()[0]).toMatchObject({
+      id: project.id,
+      prdPresent: true,
+    });
+    expect(generated).toMatchObject({
+      canGenerateDesignBrief: false,
+      generationBlocker: 'Regenerate the complete downstream workflow to replace a current PRD consistently.',
+      canGenerateConceptScreens: false,
+      conceptScreenGenerationBlocker: 'Regenerate the PRD with any new Concept Screen Set to keep the workflow consistent.',
+      canGeneratePrd: true,
+    });
+    await expect(workflows.generateDesignBrief(project.id)).rejects.toThrow(
+      'Regenerate the complete downstream workflow to replace a current PRD consistently.',
+    );
+    await expect(workflows.generateConceptScreens(project.id)).rejects.toThrow(
+      'Regenerate the PRD with any new Concept Screen Set to keep the workflow consistent.',
+    );
+
+    workflows.close();
+    workflowServices.splice(workflowServices.indexOf(workflows), 1);
+    const reopened = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        ...prdNotExpected(),
+        async generateDesignBrief() {
+          throw new Error('No generation should occur while reading.');
+        },
+        async generatePrd() {
+          throw new Error('No generation should occur while reading.');
+        },
+      },
+    });
+    workflowServices.push(reopened);
+    expect(reopened.getProjectWorkflow(project.id).prd).toEqual(generated.prd);
   });
 });

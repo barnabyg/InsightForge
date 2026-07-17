@@ -16,13 +16,14 @@ export interface ProjectWorkflowController {
   workflow: ProjectWorkflow | null;
   loading: boolean;
   generating: boolean;
-  generatingStage: 'design_brief' | 'concept_screens' | null;
+  generatingStage: 'design_brief' | 'concept_screens' | 'prd' | null;
   cancelling: boolean;
   conceptScreenProgress: ConceptScreenProgressEvent | null;
   error: string | null;
   refresh(): Promise<ProjectWorkflow>;
   generateDesignBrief(): Promise<ProjectWorkflow>;
   generateConceptScreens(): Promise<ProjectWorkflow>;
+  generatePrd(): Promise<ProjectWorkflow>;
   cancelConceptScreens(): Promise<void>;
   clearError(): void;
 }
@@ -30,7 +31,7 @@ export interface ProjectWorkflowController {
 export function useProjectWorkflow(projectId: string): ProjectWorkflowController {
   const [workflow, setWorkflow] = useState<ProjectWorkflow | null>(null);
   const [loading, setLoading] = useState(true);
-  const [generatingStage, setGeneratingStage] = useState<'design_brief' | 'concept_screens' | null>(null);
+  const [generatingStage, setGeneratingStage] = useState<'design_brief' | 'concept_screens' | 'prd' | null>(null);
   const [cancelling, setCancelling] = useState(false);
   const [conceptScreenProgress, setConceptScreenProgress] = useState<ConceptScreenProgressEvent | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -146,6 +147,28 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
         setCancelling(false);
         const body = await response.json().catch(() => null) as { error?: string } | null;
         throw new Error(body?.error ?? 'Concept Screen generation could not be cancelled.');
+      }
+    },
+
+    async generatePrd() {
+      setGeneratingStage('prd');
+      setError(null);
+      try {
+        const next = await requestWorkflow(
+          `/api/projects/${projectId}/prd-runs`,
+          { method: 'POST' },
+        );
+        setWorkflow(next);
+        return next;
+      } catch (generationError) {
+        const message = generationError instanceof Error
+          ? generationError.message
+          : 'PRD generation failed.';
+        setError(message);
+        await refresh().catch(() => undefined);
+        throw generationError;
+      } finally {
+        setGeneratingStage(null);
       }
     },
 

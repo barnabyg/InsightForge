@@ -86,6 +86,12 @@ export async function buildApp(
                 'Set OPENAI_API_KEY to enable generation.',
               );
             },
+            async generatePrd() {
+              throw new GenerationBoundaryError(
+                'api_key_missing',
+                'Set OPENAI_API_KEY to enable generation.',
+              );
+            },
           });
   const workflowService = await openWorkflowService(dataDirectory, {
     now,

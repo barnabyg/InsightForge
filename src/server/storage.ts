@@ -95,6 +95,7 @@ export async function initializeStorage(
         input_snapshot TEXT NOT NULL,
         input_artifact_id TEXT,
         input_run_id TEXT,
+        input_lineage_json TEXT,
         assembled_request TEXT NOT NULL,
         settings_json TEXT,
         attempt_history_json TEXT,
@@ -180,6 +181,9 @@ export async function initializeStorage(
     }
     if (!stageRunColumns.some(({ name }) => name === 'attempt_history_json')) {
       database.exec('ALTER TABLE stage_runs ADD COLUMN attempt_history_json TEXT;');
+    }
+    if (!stageRunColumns.some(({ name }) => name === 'input_lineage_json')) {
+      database.exec('ALTER TABLE stage_runs ADD COLUMN input_lineage_json TEXT;');
     }
 
     const insertDefault = database.prepare(`

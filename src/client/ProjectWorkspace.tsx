@@ -15,7 +15,7 @@ interface ProjectWorkspaceProps {
 }
 
 type SaveState = 'saved' | 'pending' | 'saving' | 'error';
-type SelectedStage = 'insight_source' | 'design_brief' | 'concept_screens';
+type SelectedStage = 'insight_source' | 'design_brief' | 'concept_screens' | 'prd';
 
 interface PendingImport {
   name: string;
@@ -168,6 +168,13 @@ export function ProjectWorkspace({
       : workflow.workflow?.designBrief
         ? 'Ready'
         : 'Waiting';
+  const prdState = workflow.generatingStage === 'prd'
+    ? 'Generating'
+    : workflow.workflow?.prd
+      ? 'Current'
+      : workflow.workflow?.conceptScreenSet
+        ? 'Ready'
+        : 'Waiting';
   const insightLocked = Boolean(workflow.workflow?.designBrief);
 
   return (
@@ -209,10 +216,10 @@ export function ProjectWorkspace({
               <span><strong>Concept Screens</strong><small>{conceptScreenState}</small></span>
             </button>
           </li>
-          <li>
-            <button type="button" disabled>
+          <li className={selectedStage === 'prd' ? styles['stage-rail-active'] : ''}>
+            <button type="button" onClick={() => void selectStage('prd')}>
               <span className={styles['rail-number']}>04</span>
-              <span><strong>PRD</strong><small>Waiting</small></span>
+              <span><strong>PRD</strong><small>{prdState}</small></span>
             </button>
           </li>
         </ol>
@@ -355,12 +362,13 @@ export function ProjectWorkspace({
 
             <RunInspector
               run={workflow.workflow?.lastDesignBriefRun ?? null}
-              generating={workflow.generating}
+              generating={workflow.generatingStage === 'design_brief'}
               elapsedSeconds={elapsedSeconds}
+              stageName="Design Brief"
             />
           </div>
         </main>
-      ) : (
+      ) : selectedStage === 'concept_screens' ? (
         <main className={`${styles['artifact-canvas']} ${styles['design-brief-canvas']}`}>
           <header className={styles['project-heading']}>
             <div>
@@ -442,6 +450,75 @@ export function ProjectWorkspace({
               generating={workflow.generatingStage === 'concept_screens'}
               elapsedSeconds={elapsedSeconds}
               progress={workflow.conceptScreenProgress}
+            />
+          </div>
+        </main>
+      ) : (
+        <main className={`${styles['artifact-canvas']} ${styles['design-brief-canvas']}`}>
+          <header className={styles['project-heading']}>
+            <div>
+              <p className={styles.eyebrow}>Stage 04 · {project.name}</p>
+              <h1>PRD</h1>
+            </div>
+            {workflow.workflow?.prd && (
+              <span className={styles['artifact-date']}>
+                Generated <time dateTime={workflow.workflow.prd.createdAt}>
+                  {new Date(workflow.workflow.prd.createdAt).toLocaleString('en-GB')}
+                </time>
+              </span>
+            )}
+          </header>
+
+          {workflow.error && (
+            <div className={styles['workspace-error']} role="alert">
+              <span>{workflow.error}</span>
+              <button type="button" onClick={workflow.clearError}>Dismiss</button>
+            </div>
+          )}
+
+          <div className={styles['design-brief-layout']}>
+            <div className={styles['design-brief-main']}>
+              <section className={styles['stage-action-card']} aria-label="PRD generation">
+                <div>
+                  <p className={styles.eyebrow}>Shared Stage Configuration</p>
+                  <strong>{workflow.workflow?.prdConfiguration.model ?? 'Loading model…'}</strong>
+                  <span>Uses the protected Design Brief and all three current Concept Screens. The Insight Source is not attached separately.</span>
+                </div>
+                <a href="/?view=prompts">Edit shared prompt</a>
+                <button
+                  className={styles['primary-action']}
+                  type="button"
+                  disabled={workflow.loading || workflow.generating || !workflow.workflow?.canGeneratePrd}
+                  onClick={() => void workflow.generatePrd().catch(() => undefined)}
+                >
+                  {workflow.generatingStage === 'prd'
+                    ? 'Generating…'
+                    : workflow.workflow?.prd
+                      ? 'Generate another variation'
+                      : 'Generate PRD'}
+                </button>
+              </section>
+
+              {workflow.workflow?.prdGenerationBlocker && (
+                <p className={styles['generation-blocker']}>{workflow.workflow.prdGenerationBlocker}</p>
+              )}
+
+              {workflow.workflow?.prd ? (
+                <MarkdownArtifact artifact={workflow.workflow.prd} projectName={project.name} />
+              ) : (
+                <section className={styles['artifact-empty']}>
+                  <span aria-hidden="true">04</span>
+                  <h2>Turn product intent into requirements</h2>
+                  <p>The PRD will reconcile the Design Brief and all three Concept Screens in one read-only Markdown Artifact.</p>
+                </section>
+              )}
+            </div>
+
+            <RunInspector
+              run={workflow.workflow?.lastPrdRun ?? null}
+              generating={workflow.generatingStage === 'prd'}
+              elapsedSeconds={elapsedSeconds}
+              stageName="PRD"
             />
           </div>
         </main>

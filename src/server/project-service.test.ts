@@ -48,6 +48,7 @@ describe('Project service', () => {
         insightSourcePresent: true,
         designBriefPresent: false,
         conceptScreenSetPresent: false,
+        prdPresent: false,
       },
     ]);
   });

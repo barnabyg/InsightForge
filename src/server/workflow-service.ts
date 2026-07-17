@@ -16,6 +16,9 @@ import type {
   DesignBriefArtifact,
   DesignBriefGenerationResult,
   DesignBriefRun,
+  PrdArtifact,
+  PrdGenerationResult,
+  PrdRun,
   ProjectWorkflow,
   TextGenerationBoundary,
   TokenUsage,
@@ -67,6 +70,7 @@ interface RunRow {
   input_snapshot: string;
   input_artifact_id: string | null;
   input_run_id: string | null;
+  input_lineage_json: string | null;
   assembled_request: string;
   settings_json: string | null;
   attempt_history_json: string | null;
@@ -109,6 +113,7 @@ export interface WorkflowService {
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
   generateDesignBrief(projectId: string): Promise<ProjectWorkflow>;
   generateConceptScreens(projectId: string): Promise<ProjectWorkflow>;
+  generatePrd(projectId: string): Promise<ProjectWorkflow>;
   cancelConceptScreens(projectId: string): boolean;
   subscribeConceptScreenProgress(
     projectId: string,
@@ -145,15 +150,18 @@ function wordCount(markdown: string): number {
   return markdown.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
 }
 
-function validateDesignBrief(markdown: string): ArtifactValidation {
+function validateMarkdownArtifact(
+  markdown: string,
+  artifactName: 'Design Brief' | 'PRD',
+): ArtifactValidation {
   if (!markdown.trim()) {
-    throw new WorkflowValidationError('OpenAI returned an empty Design Brief');
+    throw new WorkflowValidationError(`OpenAI returned an empty ${artifactName}`);
   }
   const words = wordCount(markdown);
   const warnings = words < 250
     ? [{
         code: 'below_recommended_word_count' as const,
-        message: `Design Brief is ${words} words; the recommended minimum is 250.`,
+        message: `${artifactName} is ${words} words; the recommended minimum is 250.`,
       }]
     : [];
   return {
@@ -161,6 +169,10 @@ function validateDesignBrief(markdown: string): ArtifactValidation {
     wordCount: words,
     warnings,
   };
+}
+
+function validateDesignBrief(markdown: string): ArtifactValidation {
+  return validateMarkdownArtifact(markdown, 'Design Brief');
 }
 
 function readJson<T>(value: string | null): T | null {
@@ -197,6 +209,46 @@ function runFromRow(row: RunRow | undefined): DesignBriefRun | null {
       name: 'Insight Source',
       value: row.input_snapshot,
     },
+    assembledRequest: row.assembled_request,
+    responseId: row.response_id,
+    requestId: row.request_id,
+    usage: readJson<TokenUsage>(row.usage_json),
+    validation: readJson<ArtifactValidation>(row.validation_json),
+    error: row.error_code && row.error_message
+      ? { code: row.error_code, message: row.error_message }
+      : null,
+  };
+}
+
+function prdArtifactFromRow(row: ArtifactRow | undefined): PrdArtifact | null {
+  if (!row) return null;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    stageId: 'prd',
+    runId: row.run_id,
+    markdown: row.markdown,
+    createdAt: row.created_at,
+    validation: JSON.parse(row.validation_json) as ArtifactValidation,
+  };
+}
+
+function prdRunFromRow(row: RunRow | undefined): PrdRun | null {
+  if (!row) return null;
+  const lineage = readJson<PrdRun['stageInput']>(row.input_lineage_json);
+  if (!lineage) return null;
+  return {
+    id: row.id,
+    projectId: row.project_id,
+    stageId: 'prd',
+    status: row.status,
+    startedAt: row.started_at,
+    completedAt: row.completed_at,
+    durationMs: row.duration_ms,
+    stagePrompt: row.prompt_snapshot,
+    model: row.model_snapshot,
+    stageConfigurationUpdatedAt: row.stage_configuration_updated_at,
+    stageInput: lineage,
     assembledRequest: row.assembled_request,
     responseId: row.response_id,
     requestId: row.request_id,
@@ -421,6 +473,18 @@ export async function openWorkflowService(
     return configuration as ConfigurationRow & { image_quality: ImageQuality };
   }
 
+  function prdConfiguration(): ConfigurationRow {
+    const configuration = database.prepare(`
+      SELECT prompt, model, image_quality, updated_at
+      FROM stage_configurations
+      WHERE stage_id = 'prd'
+    `).get() as unknown as ConfigurationRow | undefined;
+    if (!configuration) {
+      throw new Error('PRD Stage Configuration is missing');
+    }
+    return configuration;
+  }
+
   function conceptOperations(runId: string): ConceptOperationRow[] {
     return database.prepare(`
       SELECT operation.*, asset.width, asset.height, asset.byte_size,
@@ -449,10 +513,19 @@ export async function openWorkflowService(
     } | undefined;
   }
 
+  function hasCurrentPrd(projectId: string): boolean {
+    return Boolean(database.prepare(`
+      SELECT 1
+      FROM current_artifacts
+      WHERE project_id = ? AND stage_id = 'prd'
+    `).get(projectId));
+  }
+
   function readProjectWorkflow(projectId: string): ProjectWorkflow {
     const project = requireProject(projectId);
     const configuration = designBriefConfiguration();
     const imageConfiguration = conceptScreenConfiguration();
+    const textConfiguration = prdConfiguration();
     const artifact = database.prepare(`
       SELECT artifact.id, artifact.project_id, artifact.run_id,
              artifact.markdown, artifact.created_at, artifact.validation_json
@@ -487,21 +560,42 @@ export async function openWorkflowService(
     const currentConceptOperations = conceptArtifact
       ? conceptOperations(conceptArtifact.run_id)
       : [];
+    const prdArtifact = database.prepare(`
+      SELECT artifact.id, artifact.project_id, artifact.run_id,
+             artifact.markdown, artifact.created_at, artifact.validation_json
+      FROM current_artifacts AS current
+      JOIN artifacts AS artifact ON artifact.id = current.artifact_id
+      WHERE current.project_id = ? AND current.stage_id = 'prd'
+    `).get(projectId) as unknown as ArtifactRow | undefined;
+    const lastPrdRun = database.prepare(`
+      SELECT *
+      FROM stage_runs
+      WHERE project_id = ? AND stage_id = 'prd'
+      ORDER BY started_at DESC, rowid DESC
+      LIMIT 1
+    `).get(projectId) as unknown as RunRow | undefined;
     const hasInsight = project.insight_source.trim().length > 0;
+    const hasPrd = Boolean(prdArtifact);
     return {
       projectId,
-      canGenerateDesignBrief: hasInsight,
-      generationBlocker: hasInsight ? null : 'Add an Insight Source before generating a Design Brief.',
+      canGenerateDesignBrief: hasInsight && !hasPrd,
+      generationBlocker: !hasInsight
+        ? 'Add an Insight Source before generating a Design Brief.'
+        : hasPrd
+          ? 'Regenerate the complete downstream workflow to replace a current PRD consistently.'
+          : null,
       designBrief: artifactFromRow(artifact),
       lastDesignBriefRun: runFromRow(lastRun),
       designBriefConfiguration: {
         model: configuration.model,
         promptUpdatedAt: configuration.updated_at,
       },
-      canGenerateConceptScreens: Boolean(artifact),
-      conceptScreenGenerationBlocker: artifact
-        ? null
-        : 'Generate a Design Brief before generating Concept Screens.',
+      canGenerateConceptScreens: Boolean(artifact) && !hasPrd,
+      conceptScreenGenerationBlocker: !artifact
+        ? 'Generate a Design Brief before generating Concept Screens.'
+        : hasPrd
+          ? 'Regenerate the PRD with any new Concept Screen Set to keep the workflow consistent.'
+          : null,
       conceptScreenSet: conceptArtifactFromRows(
         conceptArtifact,
         currentConceptOperations,
@@ -514,6 +608,16 @@ export async function openWorkflowService(
         model: imageConfiguration.model,
         imageQuality: imageConfiguration.image_quality,
         promptUpdatedAt: imageConfiguration.updated_at,
+      },
+      canGeneratePrd: Boolean(artifact && conceptArtifact),
+      prdGenerationBlocker: artifact && conceptArtifact
+        ? null
+        : 'Generate a Design Brief and Concept Screen Set before generating a PRD.',
+      prd: prdArtifactFromRow(prdArtifact),
+      lastPrdRun: prdRunFromRow(lastPrdRun),
+      prdConfiguration: {
+        model: textConfiguration.model,
+        promptUpdatedAt: textConfiguration.updated_at,
       },
     };
   }
@@ -528,6 +632,11 @@ export async function openWorkflowService(
       if (!project.insight_source.trim()) {
         throw new WorkflowValidationError(
           'Add an Insight Source before generating a Design Brief.',
+        );
+      }
+      if (hasCurrentPrd(projectId)) {
+        throw new WorkflowValidationError(
+          'Regenerate the complete downstream workflow to replace a current PRD consistently.',
         );
       }
       const configuration = designBriefConfiguration();
@@ -674,6 +783,11 @@ export async function openWorkflowService(
 
     async generateConceptScreens(projectId) {
       requireProject(projectId);
+      if (hasCurrentPrd(projectId)) {
+        throw new WorkflowValidationError(
+          'Regenerate the PRD with any new Concept Screen Set to keep the workflow consistent.',
+        );
+      }
       if (activeConceptRuns.has(projectId)) {
         throw new WorkflowValidationError(
           'Concept Screen generation is already running for this Project.',
@@ -1063,6 +1177,173 @@ export async function openWorkflowService(
       }
 
       activeConceptRuns.delete(projectId);
+      return readProjectWorkflow(projectId);
+    },
+
+    async generatePrd(projectId) {
+      requireProject(projectId);
+      const designBrief = database.prepare(`
+        SELECT artifact.id, artifact.project_id, artifact.run_id,
+               artifact.markdown, artifact.created_at, artifact.validation_json
+        FROM current_artifacts AS current
+        JOIN artifacts AS artifact ON artifact.id = current.artifact_id
+        WHERE current.project_id = ? AND current.stage_id = 'design_brief'
+      `).get(projectId) as unknown as ArtifactRow | undefined;
+      const conceptScreenSet = database.prepare(`
+        SELECT artifact.id, artifact.project_id, artifact.run_id,
+               artifact.created_at, artifact.validation_json
+        FROM current_artifacts AS current
+        JOIN artifacts AS artifact ON artifact.id = current.artifact_id
+        WHERE current.project_id = ? AND current.stage_id = 'concept_screens'
+      `).get(projectId) as unknown as ConceptArtifactRow | undefined;
+      if (!designBrief || !conceptScreenSet) {
+        throw new WorkflowValidationError(
+          'Generate a Design Brief and Concept Screen Set before generating a PRD.',
+        );
+      }
+      const operations = conceptOperations(conceptScreenSet.run_id)
+        .filter((operation) => operation.status === 'succeeded');
+      if (operations.length !== 3 || operations.some((operation) =>
+        !operation.asset_id || !operation.relative_path
+        || !operation.width || !operation.height)) {
+        throw new WorkflowValidationError(
+          'The current Concept Screen Set does not contain three usable PNGs.',
+        );
+      }
+      const configuration = prdConfiguration();
+      const stageInput: PrdRun['stageInput'] = {
+        designBrief: {
+          value: designBrief.markdown,
+          artifactId: designBrief.id,
+          runId: designBrief.run_id,
+        },
+        conceptScreenSet: {
+          artifactId: conceptScreenSet.id,
+          runId: conceptScreenSet.run_id,
+          screens: operations.map((operation) => ({
+            assetId: operation.asset_id!,
+            ordinal: operation.ordinal,
+            width: operation.width!,
+            height: operation.height!,
+          })),
+        },
+      };
+      const assembledRequest = [
+        'Stage Prompt:',
+        configuration.prompt,
+        '',
+        'Stage Input — Design Brief:',
+        designBrief.markdown,
+        '',
+        'Stage Input — Concept Screen Set:',
+        ...stageInput.conceptScreenSet.screens.map((screen) =>
+          `Concept Screen ${screen.ordinal}: PNG asset ${screen.assetId} (${screen.width}×${screen.height})`),
+      ].join('\n');
+      const runId = randomUUID();
+      const startedAt = now();
+      database.prepare(`
+        INSERT INTO stage_runs (
+          id, project_id, stage_id, status, started_at,
+          prompt_snapshot, model_snapshot, stage_configuration_updated_at,
+          input_snapshot, input_artifact_id, input_run_id,
+          input_lineage_json, assembled_request
+        ) VALUES (?, ?, 'prd', 'running', ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `).run(
+        runId,
+        projectId,
+        startedAt.toISOString(),
+        configuration.prompt,
+        configuration.model,
+        configuration.updated_at,
+        designBrief.markdown,
+        designBrief.id,
+        designBrief.run_id,
+        JSON.stringify(stageInput),
+        assembledRequest,
+      );
+
+      let generated: PrdGenerationResult;
+      let validation: ArtifactValidation;
+      try {
+        generated = await options.textGeneration.generatePrd({
+          model: configuration.model,
+          stagePrompt: configuration.prompt,
+          designBrief: designBrief.markdown,
+          conceptScreens: operations.map((operation) => ({
+            ordinal: operation.ordinal,
+            png: readFileSync(join(dataDirectory, operation.relative_path!)),
+          })),
+        });
+        validation = validateMarkdownArtifact(generated.markdown, 'PRD');
+      } catch (error) {
+        const completedAt = now();
+        const boundaryError = error instanceof GenerationBoundaryError ? error : null;
+        const validationError = error instanceof WorkflowValidationError ? error : null;
+        const code = boundaryError?.code
+          ?? (validationError ? 'invalid_artifact' : 'generation_failed');
+        const message = boundaryError?.message
+          ?? validationError?.message
+          ?? 'PRD generation failed.';
+        database.prepare(`
+          UPDATE stage_runs
+          SET status = 'failed', completed_at = ?, duration_ms = ?,
+              response_id = ?, request_id = ?, error_code = ?, error_message = ?
+          WHERE id = ?
+        `).run(
+          completedAt.toISOString(),
+          Math.max(0, completedAt.getTime() - startedAt.getTime()),
+          boundaryError?.responseId ?? null,
+          boundaryError?.requestId ?? null,
+          code,
+          message,
+          runId,
+        );
+        throw new WorkflowGenerationError(code, message);
+      }
+
+      const completedAt = now();
+      const artifactId = randomUUID();
+      database.exec('BEGIN IMMEDIATE;');
+      try {
+        database.prepare(`
+          UPDATE stage_runs
+          SET status = 'succeeded', completed_at = ?, duration_ms = ?,
+              response_id = ?, request_id = ?, usage_json = ?, validation_json = ?
+          WHERE id = ?
+        `).run(
+          completedAt.toISOString(),
+          Math.max(0, completedAt.getTime() - startedAt.getTime()),
+          generated.responseId,
+          generated.requestId,
+          JSON.stringify(generated.usage),
+          JSON.stringify(validation),
+          runId,
+        );
+        database.prepare(`
+          INSERT INTO artifacts (
+            id, project_id, stage_id, run_id, markdown, created_at, validation_json
+          ) VALUES (?, ?, 'prd', ?, ?, ?, ?)
+        `).run(
+          artifactId,
+          projectId,
+          runId,
+          generated.markdown.trim(),
+          completedAt.toISOString(),
+          JSON.stringify(validation),
+        );
+        database.prepare(`
+          INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
+          VALUES (?, 'prd', ?)
+          ON CONFLICT(project_id, stage_id) DO UPDATE SET
+            artifact_id = excluded.artifact_id
+        `).run(projectId, artifactId);
+        database.prepare('UPDATE projects SET updated_at = ? WHERE id = ?')
+          .run(completedAt.toISOString(), projectId);
+        database.exec('COMMIT;');
+      } catch (error) {
+        database.exec('ROLLBACK;');
+        throw error;
+      }
       return readProjectWorkflow(projectId);
     },
 

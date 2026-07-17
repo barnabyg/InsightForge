@@ -100,6 +100,19 @@ export function registerWorkflowRoutes(
     },
   );
 
+  app.post<{ Params: ProjectParameters }>(
+    '/api/projects/:id/prd-runs',
+    async (request, reply) => {
+      try {
+        await options.beforeGeneration?.();
+        const workflow = await workflows.generatePrd(request.params.id);
+        return reply.status(201).send(workflow);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
   app.delete<{ Params: ProjectParameters }>(
     '/api/projects/:id/concept-screen-runs/active',
     async (request, reply) => {

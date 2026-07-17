@@ -1,10 +1,11 @@
-import type { DesignBriefRun } from '../shared/generation.js';
+import type { DesignBriefRun, PrdRun } from '../shared/generation.js';
 import styles from './App.module.css';
 
 interface RunInspectorProps {
-  run: DesignBriefRun | null;
+  run: DesignBriefRun | PrdRun | null;
   generating: boolean;
   elapsedSeconds: number;
+  stageName: 'Design Brief' | 'PRD';
 }
 
 function formatDuration(milliseconds: number | null): string {
@@ -13,7 +14,7 @@ function formatDuration(milliseconds: number | null): string {
   return `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
-export function RunInspector({ run, generating, elapsedSeconds }: RunInspectorProps) {
+export function RunInspector({ run, generating, elapsedSeconds, stageName }: RunInspectorProps) {
   return (
     <aside className={styles['run-inspector']} aria-label="Run Inspector">
       <div className={styles['inspector-heading']}>
@@ -22,9 +23,9 @@ export function RunInspector({ run, generating, elapsedSeconds }: RunInspectorPr
       </div>
 
       {generating ? (
-        <div className={styles['run-progress']} role="status" aria-label="Generating Design Brief">
+        <div className={styles['run-progress']} role="status" aria-label={`Generating ${stageName}`}>
           <span className={styles['progress-spinner']} aria-hidden="true" />
-          <strong>Generating Design Brief</strong>
+          <strong>Generating {stageName}</strong>
           <span>{elapsedSeconds}s elapsed · one OpenAI text request</span>
         </div>
       ) : run ? (
@@ -38,6 +39,13 @@ export function RunInspector({ run, generating, elapsedSeconds }: RunInspectorPr
             <div><dt>Model</dt><dd>{run.model}</dd></div>
             <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
             <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString('en-GB')}</time></dd></div>
+            {run.stageId === 'prd' && (
+              <>
+                <div><dt>Design Brief input</dt><dd><code>{run.stageInput.designBrief.artifactId}</code></dd></div>
+                <div><dt>Visual inputs</dt><dd>{run.stageInput.conceptScreenSet.screens.length} Concept Screens</dd></div>
+                <div><dt>Concept Screen Set</dt><dd><code>{run.stageInput.conceptScreenSet.artifactId}</code></dd></div>
+              </>
+            )}
             {run.validation && (
               <div><dt>Validation</dt><dd>{run.validation.wordCount} words · {run.validation.status === 'valid' ? 'Valid' : 'Warning'}</dd></div>
             )}

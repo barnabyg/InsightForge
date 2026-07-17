@@ -1,9 +1,9 @@
 import { useMemo, useState } from 'react';
-import type { DesignBriefArtifact } from '../shared/generation.js';
+import type { DesignBriefArtifact, PrdArtifact } from '../shared/generation.js';
 import styles from './App.module.css';
 
 interface MarkdownArtifactProps {
-  artifact: DesignBriefArtifact;
+  artifact: DesignBriefArtifact | PrdArtifact;
   projectName: string;
 }
 
@@ -35,6 +35,9 @@ function markdownBlocks(markdown: string): MarkdownBlock[] {
 }
 
 export function MarkdownArtifact({ artifact, projectName }: MarkdownArtifactProps) {
+  const artifactName = artifact.stageId === 'prd' ? 'PRD' : 'Design Brief';
+  const searchName = artifact.stageId === 'prd' ? 'PRD' : 'Design Brief';
+  const fileSuffix = artifact.stageId === 'prd' ? 'prd' : 'design-brief';
   const [raw, setRaw] = useState(false);
   const [query, setQuery] = useState('');
   const blocks = useMemo(() => markdownBlocks(artifact.markdown), [artifact.markdown]);
@@ -48,13 +51,13 @@ export function MarkdownArtifact({ artifact, projectName }: MarkdownArtifactProp
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${projectName.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'project'}-design-brief.md`;
+    anchor.download = `${projectName.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'project'}-${fileSuffix}.md`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
 
   return (
-    <article className={styles['markdown-artifact']} aria-label="Design Brief Artifact">
+    <article className={styles['markdown-artifact']} aria-label={`${artifactName} Artifact`}>
       <header className={styles['artifact-toolbar']}>
         <div>
           <span className={styles['readonly-badge']}>Read-only Artifact</span>
@@ -62,12 +65,12 @@ export function MarkdownArtifact({ artifact, projectName }: MarkdownArtifactProp
         </div>
         <div className={styles['artifact-tools']}>
           <label>
-            <span className={styles['visually-hidden']}>Search Design Brief</span>
+            <span className={styles['visually-hidden']}>Search {searchName}</span>
             <input
               type="search"
               value={query}
-              placeholder="Find in brief"
-              aria-label="Search Design Brief"
+              placeholder={artifact.stageId === 'prd' ? 'Find in PRD' : 'Find in brief'}
+              aria-label={`Search ${searchName}`}
               onChange={(event) => setQuery(event.target.value)}
             />
           </label>

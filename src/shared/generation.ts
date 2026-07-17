@@ -120,6 +120,16 @@ export interface DesignBriefArtifact {
   validation: ArtifactValidation;
 }
 
+export interface PrdArtifact {
+  id: string;
+  projectId: string;
+  stageId: 'prd';
+  runId: string;
+  markdown: string;
+  createdAt: string;
+  validation: ArtifactValidation;
+}
+
 export interface DesignBriefRun {
   id: string;
   projectId: string;
@@ -134,6 +144,45 @@ export interface DesignBriefRun {
   stageInput: {
     name: 'Insight Source';
     value: string;
+  };
+  assembledRequest: string;
+  responseId: string | null;
+  requestId: string | null;
+  usage: TokenUsage | null;
+  validation: ArtifactValidation | null;
+  error: {
+    code: string;
+    message: string;
+  } | null;
+}
+
+export interface PrdRun {
+  id: string;
+  projectId: string;
+  stageId: 'prd';
+  status: 'running' | 'succeeded' | 'failed';
+  startedAt: string;
+  completedAt: string | null;
+  durationMs: number | null;
+  stagePrompt: string;
+  model: string;
+  stageConfigurationUpdatedAt: string;
+  stageInput: {
+    designBrief: {
+      value: string;
+      artifactId: string;
+      runId: string;
+    };
+    conceptScreenSet: {
+      artifactId: string;
+      runId: string;
+      screens: Array<{
+        assetId: string;
+        ordinal: ConceptScreenOrdinal;
+        width: number;
+        height: number;
+      }>;
+    };
   };
   assembledRequest: string;
   responseId: string | null;
@@ -165,6 +214,14 @@ export interface ProjectWorkflow {
     imageQuality: 'low' | 'medium' | 'high';
     promptUpdatedAt: string;
   };
+  canGeneratePrd: boolean;
+  prdGenerationBlocker: string | null;
+  prd: PrdArtifact | null;
+  lastPrdRun: PrdRun | null;
+  prdConfiguration: {
+    model: string;
+    promptUpdatedAt: string;
+  };
 }
 
 export interface DesignBriefGenerationResult {
@@ -174,10 +231,28 @@ export interface DesignBriefGenerationResult {
   usage: TokenUsage;
 }
 
+export interface PrdGenerationResult {
+  markdown: string;
+  responseId: string;
+  requestId: string;
+  usage: TokenUsage;
+}
+
+export interface PrdConceptScreenInput {
+  ordinal: ConceptScreenOrdinal;
+  png: Uint8Array;
+}
+
 export interface TextGenerationBoundary {
   generateDesignBrief(input: {
     model: string;
     stagePrompt: string;
     insightSource: string;
   }): Promise<DesignBriefGenerationResult>;
+  generatePrd(input: {
+    model: string;
+    stagePrompt: string;
+    designBrief: string;
+    conceptScreens: PrdConceptScreenInput[];
+  }): Promise<PrdGenerationResult>;
 }

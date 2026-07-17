@@ -139,4 +139,77 @@ describe('Workflow HTTP API', () => {
       );
     }
   });
+
+  it('generates and retrieves a PRD with its upstream lineage through the public workflow resource', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const app = await buildApp({ dataDirectory, mode: 'mock' });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Requirements from product intent',
+        insightSource: 'People need to compare options, inspect trade-offs, and preserve a decision record.',
+      },
+    });
+    const projectId = created.json().id as string;
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/design-brief-runs`,
+      headers: { host: 'localhost:4317' },
+    });
+    await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/concept-screen-runs`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/prd-runs`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(generated.statusCode).toBe(201);
+    expect(generated.json()).toMatchObject({
+      projectId,
+      prd: {
+        stageId: 'prd',
+        markdown: expect.stringContaining('# Product Requirements Document'),
+        validation: { status: 'valid', warnings: [] },
+      },
+      lastPrdRun: {
+        stageId: 'prd',
+        status: 'succeeded',
+        model: 'gpt-5.6-luna',
+        responseId: expect.stringMatching(/^mock_resp_/),
+        requestId: expect.stringMatching(/^mock_req_/),
+        stageInput: {
+          designBrief: {
+            artifactId: expect.any(String),
+            runId: expect.any(String),
+          },
+          conceptScreenSet: {
+            artifactId: expect.any(String),
+            runId: expect.any(String),
+            screens: [
+              { ordinal: 1, assetId: expect.any(String) },
+              { ordinal: 2, assetId: expect.any(String) },
+              { ordinal: 3, assetId: expect.any(String) },
+            ],
+          },
+        },
+      },
+    });
+    expect(generated.json().lastPrdRun.stageInput).not.toHaveProperty('insightSource');
+
+    const retrieved = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}/workflow`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(retrieved.json().prd).toEqual(generated.json().prd);
+  });
 });
