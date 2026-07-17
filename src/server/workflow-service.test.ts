@@ -1198,6 +1198,7 @@ describe('Workflow service', () => {
     configuration.close();
 
     const update = workflows.getProjectWorkflow(project.id);
+    expect(projects.listProjects()[0]?.updateAvailable).toBe(true);
     expect(update.rerunPlan).toMatchObject({
       earliestChangedStage: 'design_brief',
       affectedStages: ['design_brief', 'concept_screens', 'prd'],
@@ -1263,6 +1264,7 @@ describe('Workflow service', () => {
       }),
     ]);
     expect(regenerated.rerunPlan).toBeNull();
+    expect(projects.listProjects()[0]?.updateAvailable).toBe(false);
   });
 
   it('regenerates from Concept Screens when its prompt or image settings change', async () => {

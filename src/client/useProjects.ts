@@ -26,6 +26,7 @@ export interface ProjectsController {
   error: string | null;
   createProject(input?: CreateProjectInput): Promise<Project>;
   openProject(id: string): Promise<void>;
+  refreshLibrary(): Promise<void>;
   showLibrary(): void;
   updateInsightSource(id: string, insightSource: string): Promise<Project>;
   renameProject(id: string, name: string): Promise<void>;
@@ -127,6 +128,7 @@ export function useProjects(): ProjectsController {
     currentProject,
     loading,
     error,
+    refreshLibrary,
 
     async createProject(input = {}) {
       return run(async () => {

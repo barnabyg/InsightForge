@@ -115,7 +115,9 @@ export function ProjectLibrary({
                 <div className={styles['project-card-topline']}>
                   <span>{String(index + 1).padStart(2, '0')}</span>
                   <span className={styles['project-status']}>
-                    {project.prdPresent
+                    {project.updateAvailable
+                      ? 'Update Available'
+                      : project.prdPresent
                       ? 'PRD ready'
                       : project.conceptScreenSetPresent
                       ? 'Concept Screens ready'

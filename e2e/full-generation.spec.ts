@@ -76,8 +76,9 @@ test('Author regenerates an affected suffix and deliberately requests a Variatio
   await expect(page.getByRole('status', { name: 'Active Stage Configuration saved' }))
     .toBeVisible();
   await page.getByRole('link', { name: 'Projects' }).click();
-  await page.getByRole('article', { name: 'Safe rerun demonstration' })
-    .getByRole('button', { name: /Safe rerun demonstration/ }).click();
+  const projectCard = page.getByRole('article', { name: 'Safe rerun demonstration' });
+  await expect(projectCard).toContainText('Update Available');
+  await projectCard.getByRole('button', { name: /Safe rerun demonstration/ }).click();
 
   await expect(page.getByRole('button', { name: /Design Brief/ }))
     .toContainText('Update Available');

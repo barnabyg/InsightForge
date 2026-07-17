@@ -49,6 +49,7 @@ describe('Project service', () => {
         designBriefPresent: false,
         conceptScreenSetPresent: false,
         prdPresent: false,
+        updateAvailable: false,
       },
     ]);
   });

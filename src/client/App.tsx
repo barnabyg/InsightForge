@@ -31,6 +31,9 @@ export function App() {
 
   function showView(nextView: 'projects' | 'prompts') {
     setView(nextView);
+    if (nextView === 'projects') {
+      void projects.refreshLibrary();
+    }
     window.history.pushState(
       {},
       '',
