@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import type { CandidateWorkflow } from '../shared/generation.js';
 import type { Project } from '../shared/projects.js';
 import { MarkdownArtifact } from './MarkdownArtifact.js';
 import { ConceptScreenGallery } from './ConceptScreenGallery.js';
@@ -21,6 +22,74 @@ interface PendingImport {
   name: string;
   text: string;
 }
+
+type CandidatePrimaryAction = 'cancel' | 'promote' | 'resume';
+
+const candidatePresentationByStatus = {
+  running: {
+    heading: 'Candidate generation continues',
+    locationPrefix: 'currently at',
+    primaryAction: 'cancel',
+    primaryActionLabel: 'Cancel after current operation',
+    canKeep: false,
+    canDiscard: false,
+  },
+  paused: {
+    heading: 'Candidate paused safely',
+    locationPrefix: 'stopped at',
+    primaryAction: 'resume',
+    primaryActionLabel: 'Resume Candidate Workflow',
+    canKeep: false,
+    canDiscard: true,
+  },
+  failed: {
+    heading: 'Candidate generation failed',
+    locationPrefix: 'stopped at',
+    primaryAction: 'resume',
+    primaryActionLabel: 'Resume Candidate Workflow',
+    canKeep: false,
+    canDiscard: true,
+  },
+  cancelled: {
+    heading: 'Candidate cancelled safely',
+    locationPrefix: 'stopped at',
+    primaryAction: 'resume',
+    primaryActionLabel: 'Resume Candidate Workflow',
+    canKeep: false,
+    canDiscard: true,
+  },
+  awaiting_promotion: {
+    heading: 'Candidate ready for promotion',
+    locationPrefix: 'ready at',
+    primaryAction: 'promote',
+    primaryActionLabel: 'Promote Candidate Workflow',
+    canKeep: false,
+    canDiscard: true,
+  },
+  awaiting_warning_review: {
+    heading: 'Candidate ready for warning review',
+    locationPrefix: 'ready at',
+    primaryAction: 'promote',
+    primaryActionLabel: 'Promote Candidate Workflow',
+    canKeep: true,
+    canDiscard: true,
+  },
+  kept_after_warning_review: {
+    heading: 'Candidate kept for later',
+    locationPrefix: 'ready at',
+    primaryAction: 'promote',
+    primaryActionLabel: 'Promote Candidate Workflow',
+    canKeep: false,
+    canDiscard: true,
+  },
+} satisfies Record<CandidateWorkflow['status'], {
+  heading: string;
+  locationPrefix: string;
+  primaryAction: CandidatePrimaryAction;
+  primaryActionLabel: string;
+  canKeep: boolean;
+  canDiscard: boolean;
+}>;
 
 export function ProjectWorkspace({
   project,
@@ -183,6 +252,16 @@ export function ProjectWorkspace({
   );
   const fullProgress = workflow.fullGenerationProgress;
   const candidate = workflow.workflow?.candidate;
+  const candidatePresentation = candidate
+    ? candidatePresentationByStatus[candidate.status]
+    : null;
+  const candidatePrimaryAction = candidatePresentation
+    ? {
+        cancel: workflow.cancelFullWorkflow,
+        promote: workflow.promoteFullWorkflow,
+        resume: workflow.resumeFullWorkflow,
+      }[candidatePresentation.primaryAction]
+    : null;
   const fullStageName = {
     design_brief: 'Design Brief',
     concept_screens: 'Concept Screens',
@@ -358,21 +437,9 @@ export function ProjectWorkspace({
               <div className={styles['candidate-summary']} role="status">
                 <div>
                   <strong>
-                    {candidate.status === 'awaiting_warning_review'
-                      ? 'Candidate ready for warning review'
-                      : candidate.status === 'kept_after_warning_review'
-                        ? 'Candidate kept for later'
-                      : candidate.status === 'awaiting_promotion'
-                        ? 'Candidate ready for promotion'
-                      : candidate.status === 'running'
-                        ? 'Candidate generation continues'
-                      : candidate.status === 'paused'
-                        ? 'Candidate paused safely'
-                      : candidate.status === 'cancelled'
-                        ? 'Candidate cancelled safely'
-                        : 'Candidate generation failed'}
+                    {candidatePresentation?.heading}
                   </strong>
-                  <span>{candidate.completedOperationCount} of 5 operations complete · {candidate.status === 'running' ? 'currently at' : 'stopped at'} {fullStageName}</span>
+                  <span>{candidate.completedOperationCount} of 5 operations complete · {candidatePresentation?.locationPrefix} {fullStageName}</span>
                   {candidate.error && <p>{candidate.error.message}</p>}
                 </div>
                 {candidate.warnings.length > 0 && (
@@ -384,27 +451,21 @@ export function ProjectWorkspace({
                   </div>
                 )}
                 <div className={styles['candidate-actions']}>
-                  {candidate.status === 'running' ? (
-                    <button className={styles['secondary-action']} type="button" onClick={() => {
-                      void workflow.cancelFullWorkflow().catch(() => undefined);
-                    }}>Cancel after current operation</button>
-                  ) : candidate.status === 'awaiting_warning_review'
-                    || candidate.status === 'awaiting_promotion'
-                    || candidate.status === 'kept_after_warning_review' ? (
-                    <button className={styles['primary-action']} type="button" onClick={() => {
-                      void workflow.promoteFullWorkflow().catch(() => undefined);
-                    }}>Promote Candidate Workflow</button>
-                  ) : (
-                    <button className={styles['primary-action']} type="button" onClick={() => {
-                      void workflow.resumeFullWorkflow().catch(() => undefined);
-                    }}>Resume Candidate Workflow</button>
-                  )}
-                  {candidate.status === 'awaiting_warning_review' && (
+                  <button
+                    className={candidatePresentation?.primaryAction === 'cancel'
+                      ? styles['secondary-action']
+                      : styles['primary-action']}
+                    type="button"
+                    onClick={() => {
+                      void candidatePrimaryAction?.().catch(() => undefined);
+                    }}
+                  >{candidatePresentation?.primaryActionLabel}</button>
+                  {candidatePresentation?.canKeep && (
                     <button className={styles['secondary-action']} type="button" onClick={() => {
                       void workflow.keepCandidateAfterWarningReview().catch(() => undefined);
                     }}>Keep Candidate Workflow</button>
                   )}
-                  {candidate.status !== 'running' && (
+                  {candidatePresentation?.canDiscard && (
                     <button className={styles['danger-action']} type="button" onClick={() => {
                       void workflow.discardFullWorkflow().catch(() => undefined);
                     }}>Discard Candidate Workflow</button>
