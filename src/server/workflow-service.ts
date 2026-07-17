@@ -1,4 +1,4 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -32,15 +32,18 @@ import type {
   RunKind,
   TextGenerationBoundary,
   TokenUsage,
-  WorkflowChangeKind,
-  WorkflowFingerprint,
-  WorkflowRerunPlan,
   WorkflowSnapshotSummary,
 } from '../shared/generation.js';
 import type { ImageQuality, StageId } from '../shared/workflow-configuration.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
 import { initializeStorage } from './storage.js';
+import {
+  buildPrdStageInput,
+  readWorkflowRerunPlan,
+  storedRunFingerprint,
+  workflowFingerprint,
+} from './workflow-update-analysis.js';
 
 export { GenerationBoundaryError } from './generation-boundary.js';
 
@@ -162,30 +165,6 @@ interface CandidateConfigurations {
   prd: ConfigurationRow;
 }
 
-function buildPrdStageInput(
-  designBrief: ArtifactRow,
-  conceptScreenSet: Pick<ArtifactRow, 'id' | 'run_id'>,
-  operations: ConceptOperationRow[],
-): PrdRun['stageInput'] {
-  return {
-    designBrief: {
-      value: designBrief.markdown,
-      artifactId: designBrief.id,
-      runId: designBrief.run_id,
-    },
-    conceptScreenSet: {
-      artifactId: conceptScreenSet.id,
-      runId: conceptScreenSet.run_id,
-      screens: operations.map((operation) => ({
-        assetId: operation.asset_id!,
-        ordinal: operation.ordinal,
-        width: operation.width!,
-        height: operation.height!,
-      })),
-    },
-  };
-}
-
 export interface WorkflowService {
   getProjectWorkflow(projectId: string): ProjectWorkflow;
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
@@ -284,49 +263,6 @@ function validateDesignBrief(markdown: string): ArtifactValidation {
 
 function readJson<T>(value: string | null): T | null {
   return value === null ? null : JSON.parse(value) as T;
-}
-
-const workflowChangeMessages: Record<WorkflowChangeKind, string> = {
-  input: 'The Stage Input changed since the current Artifact was generated.',
-  prompt: 'The shared Stage Prompt changed since the current Artifact was generated.',
-  model: 'The selected model changed since the current Artifact was generated.',
-  settings: 'The generation settings changed since the current Artifact was generated.',
-};
-
-function sha256(value: string): string {
-  return createHash('sha256').update(value).digest('hex');
-}
-
-function workflowFingerprint(parts: {
-  input: string;
-  prompt: string;
-  model: string;
-  settings: string;
-}): WorkflowFingerprint {
-  const fingerprint = {
-    input: sha256(parts.input),
-    prompt: sha256(parts.prompt),
-    model: sha256(parts.model),
-    settings: sha256(parts.settings),
-  };
-  return {
-    ...fingerprint,
-    combined: sha256(JSON.stringify(fingerprint)),
-  };
-}
-
-function storedRunFingerprint(
-  run: RunRow,
-  stageId: GeneratedStageId,
-): WorkflowFingerprint {
-  return workflowFingerprint({
-    input: stageId === 'prd'
-      ? run.input_lineage_json ?? run.input_snapshot
-      : run.input_snapshot,
-    prompt: run.prompt_snapshot,
-    model: run.model_snapshot,
-    settings: run.settings_json ?? 'null',
-  });
 }
 
 function candidateFromRow(row: CandidateRow | undefined): CandidateWorkflow | null {
@@ -839,51 +775,6 @@ export async function openWorkflowService(
     ).get(runId) as unknown as RunRow | undefined;
   }
 
-  function stageFingerprints(
-    projectId: string,
-    stageId: GeneratedStageId,
-  ): { previous: WorkflowFingerprint; current: WorkflowFingerprint } | null {
-    const project = requireProject(projectId);
-    const artifact = currentArtifact(projectId, stageId);
-    if (!artifact) return null;
-    const run = stageRun(artifact.run_id);
-    if (!run) return null;
-
-    let currentInput: string;
-    let configuration: ConfigurationRow;
-    let currentSettings = 'null';
-    if (stageId === 'design_brief') {
-      currentInput = project.insight_source;
-      configuration = designBriefConfiguration();
-    } else if (stageId === 'concept_screens') {
-      const designBrief = currentArtifact(projectId, 'design_brief');
-      if (!designBrief) return null;
-      currentInput = designBrief.markdown;
-      configuration = conceptScreenConfiguration();
-      currentSettings = JSON.stringify({ imageQuality: configuration.image_quality });
-    } else {
-      const designBrief = currentArtifact(projectId, 'design_brief');
-      const conceptScreenSet = currentArtifact(projectId, 'concept_screens');
-      if (!designBrief || !conceptScreenSet) return null;
-      currentInput = JSON.stringify(buildPrdStageInput(
-        designBrief,
-        conceptScreenSet,
-        conceptOperations(conceptScreenSet.run_id)
-          .filter((operation) => operation.status === 'succeeded'),
-      ));
-      configuration = prdConfiguration();
-    }
-    return {
-      previous: storedRunFingerprint(run, stageId),
-      current: workflowFingerprint({
-        input: currentInput,
-        prompt: configuration.prompt,
-        model: configuration.model,
-        settings: currentSettings,
-      }),
-    };
-  }
-
   function classifyStageRun(
     projectId: string,
     stageId: GeneratedStageId,
@@ -902,39 +793,6 @@ export async function openWorkflowService(
       === workflowFingerprint(next).combined
       ? 'variation'
       : 'regeneration';
-  }
-
-  function rerunPlan(projectId: string): WorkflowRerunPlan | null {
-    const changes: WorkflowRerunPlan['changes'] = [];
-    const fingerprints = new Map<GeneratedStageId, {
-      previous: WorkflowFingerprint;
-      current: WorkflowFingerprint;
-    }>();
-    for (const stageId of generatedStageIds) {
-      const stage = stageFingerprints(projectId, stageId);
-      if (!stage) continue;
-      fingerprints.set(stageId, stage);
-      for (const kind of ['input', 'prompt', 'model', 'settings'] as const) {
-        if (stage.previous[kind] !== stage.current[kind]) {
-          changes.push({
-            stageId,
-            kind,
-            message: workflowChangeMessages[kind],
-          });
-        }
-      }
-    }
-    const earliestChangedStage = generatedStageIds.find((stageId) =>
-      changes.some((change) => change.stageId === stageId));
-    if (!earliestChangedStage) return null;
-    return {
-      earliestChangedStage,
-      affectedStages: generatedStageIds.slice(generatedStageIds.indexOf(earliestChangedStage)),
-      changes,
-      fingerprints: generatedStageIds
-        .filter((stageId) => changes.some((change) => change.stageId === stageId))
-        .map((stageId) => ({ stageId, ...fingerprints.get(stageId)! })),
-    };
   }
 
   function workflowSnapshots(projectId: string): WorkflowSnapshotSummary[] {
@@ -1148,7 +1006,7 @@ export async function openWorkflowService(
     const candidate = candidateRow(projectId);
     return {
       projectId,
-      rerunPlan: rerunPlan(projectId),
+      rerunPlan: readWorkflowRerunPlan(database, projectId),
       snapshots: workflowSnapshots(projectId),
       canGenerateFullWorkflow: hasInsight && !candidate && !hasWorkflow,
       fullGenerationBlocker: !hasInsight
@@ -2423,7 +2281,7 @@ export async function openWorkflowService(
           'Generate the complete workflow before regenerating from a stage.',
         );
       }
-      const update = rerunPlan(projectId);
+      const update = readWorkflowRerunPlan(database, projectId);
       if (
         update
         && generatedStageIds.indexOf(startStage)

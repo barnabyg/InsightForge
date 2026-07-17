@@ -7,6 +7,7 @@ import type {
   ProjectSummary,
 } from '../shared/projects.js';
 import { initializeStorage } from './storage.js';
+import { readWorkflowRerunPlan } from './workflow-update-analysis.js';
 
 interface ProjectRow {
   id: string;
@@ -18,7 +19,6 @@ interface ProjectRow {
   design_brief_present?: number;
   concept_screen_set_present?: number;
   prd_present?: number;
-  update_available?: number;
 }
 
 export interface ProjectServiceOptions {
@@ -147,25 +147,7 @@ export async function openProjectService(
                  SELECT 1 FROM current_artifacts AS current
                  WHERE current.project_id = project.id
                    AND current.stage_id = 'prd'
-               ) AS prd_present,
-               EXISTS (
-                 SELECT 1
-                 FROM current_artifacts AS current
-                 JOIN artifacts AS artifact ON artifact.id = current.artifact_id
-                 JOIN stage_runs AS run ON run.id = artifact.run_id
-                 JOIN stage_configurations AS configuration
-                   ON configuration.stage_id = current.stage_id
-                 WHERE current.project_id = project.id
-                   AND (
-                     run.prompt_snapshot <> configuration.prompt
-                     OR run.model_snapshot <> configuration.model
-                     OR (
-                       current.stage_id = 'concept_screens'
-                       AND COALESCE(json_extract(run.settings_json, '$.imageQuality'), '')
-                         <> COALESCE(configuration.image_quality, '')
-                     )
-                   )
-               ) AS update_available
+               ) AS prd_present
         FROM projects AS project
         ORDER BY updated_at DESC, created_at DESC, id ASC
       `).all() as unknown as ProjectRow[];
@@ -178,7 +160,7 @@ export async function openProjectService(
         designBriefPresent: row.design_brief_present === 1,
         conceptScreenSetPresent: row.concept_screen_set_present === 1,
         prdPresent: row.prd_present === 1,
-        updateAvailable: row.update_available === 1,
+        updateAvailable: readWorkflowRerunPlan(database, row.id) !== null,
       }));
     },
 
