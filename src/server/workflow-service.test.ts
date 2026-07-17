@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -1387,6 +1387,7 @@ describe('Workflow service', () => {
 
     const restoredAssetId = original.conceptScreenSet!.screens[0]!.assetId;
     const replacedAssetId = regenerated.conceptScreenSet!.screens[0]!.assetId;
+    const replacedAssetBytes = workflows.getConceptScreenAsset(project.id, replacedAssetId);
     const restorationSnapshotId = restored.snapshots[0]!.id;
     const afterSelectedDeletion = await workflows.deleteWorkflowSnapshot(
       project.id,
@@ -1396,6 +1397,17 @@ describe('Workflow service', () => {
       .toEqual([restorationSnapshotId]);
     expect(workflows.getConceptScreenAsset(project.id, restoredAssetId))
       .toEqual(pngFixture(31));
+
+    const replacedAssetPath = join(dataDirectory, 'assets', `${replacedAssetId}.png`);
+    await rm(replacedAssetPath);
+    await mkdir(replacedAssetPath);
+    await writeFile(join(replacedAssetPath, 'blocker'), 'prevent file reclamation');
+    await expect(workflows.deleteWorkflowSnapshot(project.id, restorationSnapshotId))
+      .rejects.toThrow();
+    expect(workflows.getProjectWorkflow(project.id).snapshots.map(({ id }) => id))
+      .toEqual([restorationSnapshotId]);
+    await rm(replacedAssetPath, { recursive: true });
+    await writeFile(replacedAssetPath, replacedAssetBytes);
 
     const afterReplacedDeletion = await workflows.deleteWorkflowSnapshot(
       project.id,

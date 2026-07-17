@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { unlink, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
@@ -1038,7 +1038,11 @@ export async function openWorkflowService(
       snapshot.concept_screen_artifact_id,
       snapshot.prd_artifact_id,
     ].filter((value): value is string => Boolean(value));
-    const assetPaths: string[] = [];
+    const assetBackups: Array<{
+      path: string;
+      bytes: Buffer;
+      removed: boolean;
+    }> = [];
     database.exec('BEGIN IMMEDIATE;');
     try {
       database.prepare('DELETE FROM workflow_snapshots WHERE id = ?').run(snapshotId);
@@ -1090,17 +1094,26 @@ export async function openWorkflowService(
           artifact.run_id, artifact.run_id, artifact.run_id,
         ) as unknown as { referenced: number };
         if (!runReference.referenced) {
+          assetBackups.push(...assets.map(({ relative_path: relativePath }) => ({
+            path: join(dataDirectory, relativePath),
+            bytes: readFileSync(join(dataDirectory, relativePath)),
+            removed: false,
+          })));
           database.prepare('DELETE FROM stage_runs WHERE id = ?').run(artifact.run_id);
-          assetPaths.push(...assets.map(({ relative_path }) => relative_path));
         }
+      }
+      for (const asset of assetBackups) {
+        unlinkSync(asset.path);
+        asset.removed = true;
       }
       database.exec('COMMIT;');
     } catch (error) {
       database.exec('ROLLBACK;');
+      for (const asset of assetBackups.filter(({ removed }) => removed)) {
+        writeFileSync(asset.path, asset.bytes);
+      }
       throw error;
     }
-    await Promise.all(assetPaths.map((relativePath) =>
-      unlink(join(dataDirectory, relativePath)).catch(() => undefined)));
     return readProjectWorkflow(projectId);
   }
 
