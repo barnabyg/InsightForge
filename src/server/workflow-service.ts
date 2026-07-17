@@ -164,6 +164,7 @@ interface WorkflowSnapshotRow {
   id: string;
   created_at: string;
   replaced_from_stage: GeneratedStageId;
+  insight_source: string;
   design_brief_artifact_id: string;
   concept_screen_artifact_id: string;
   prd_artifact_id: string;
@@ -832,7 +833,7 @@ export async function openWorkflowService(
 
   function workflowSnapshots(projectId: string): WorkflowSnapshotSummary[] {
     const rows = database.prepare(`
-      SELECT id, created_at, replaced_from_stage,
+      SELECT id, created_at, replaced_from_stage, insight_source,
              design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
       FROM workflow_snapshots
       WHERE project_id = ?
@@ -842,6 +843,7 @@ export async function openWorkflowService(
       id: row.id,
       createdAt: row.created_at,
       replacedFromStage: row.replaced_from_stage,
+      insightSource: row.insight_source,
       artifactIds: {
         designBrief: row.design_brief_artifact_id,
         conceptScreens: row.concept_screen_artifact_id,
@@ -932,14 +934,15 @@ export async function openWorkflowService(
       if (currentDesignBrief && currentConceptScreens && currentPrd) {
         database.prepare(`
           INSERT INTO workflow_snapshots (
-            id, project_id, created_at, replaced_from_stage,
+            id, project_id, created_at, replaced_from_stage, insight_source,
             design_brief_artifact_id, concept_screen_artifact_id, prd_artifact_id
-          ) VALUES (?, ?, ?, ?, ?, ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
         `).run(
           randomUUID(),
           candidate.project_id,
           now().toISOString(),
           candidate.start_stage,
+          project.insight_source,
           currentDesignBrief.id,
           currentConceptScreens.id,
           currentPrd.id,

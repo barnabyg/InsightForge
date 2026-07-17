@@ -44,7 +44,7 @@ export async function initializeStorage(
         value TEXT NOT NULL
       );
       INSERT INTO app_metadata (key, value)
-      VALUES ('schema_version', '5')
+      VALUES ('schema_version', '6')
       ON CONFLICT(key) DO UPDATE SET value = excluded.value;
 
       CREATE TABLE IF NOT EXISTS projects (
@@ -137,6 +137,7 @@ export async function initializeStorage(
         created_at TEXT NOT NULL,
         replaced_from_stage TEXT NOT NULL
           CHECK (replaced_from_stage IN ('design_brief', 'concept_screens', 'prd')),
+        insight_source TEXT NOT NULL,
         design_brief_artifact_id TEXT NOT NULL
           REFERENCES artifacts(id) ON DELETE RESTRICT,
         concept_screen_artifact_id TEXT NOT NULL
@@ -268,6 +269,22 @@ export async function initializeStorage(
       database.exec(
         'ALTER TABLE workflow_candidates ADD COLUMN insight_revision_id TEXT REFERENCES insight_revisions(id) ON DELETE RESTRICT;',
       );
+    }
+
+    const snapshotColumns = database.prepare('PRAGMA table_info(workflow_snapshots)')
+      .all() as unknown as Array<{ name: string }>;
+    if (!snapshotColumns.some(({ name }) => name === 'insight_source')) {
+      database.exec('ALTER TABLE workflow_snapshots ADD COLUMN insight_source TEXT;');
+      database.exec(`
+        UPDATE workflow_snapshots
+        SET insight_source = (
+          SELECT run.input_snapshot
+          FROM artifacts AS artifact
+          JOIN stage_runs AS run ON run.id = artifact.run_id
+          WHERE artifact.id = workflow_snapshots.design_brief_artifact_id
+        )
+        WHERE insight_source IS NULL;
+      `);
     }
 
     const insertDefault = database.prepare(`

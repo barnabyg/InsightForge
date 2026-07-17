@@ -165,6 +165,7 @@ export interface WorkflowSnapshotSummary {
   id: string;
   createdAt: string;
   replacedFromStage: GeneratedStageId;
+  insightSource: string;
   artifactIds: {
     designBrief: string;
     conceptScreens: string;

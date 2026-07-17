@@ -1677,6 +1677,7 @@ describe('Workflow service', () => {
       candidate: null,
       snapshots: [{
         replacedFromStage: 'design_brief',
+        insightSource: originalInsight,
         artifactIds: {
           designBrief: original.designBrief?.id,
           conceptScreens: original.conceptScreenSet?.id,
