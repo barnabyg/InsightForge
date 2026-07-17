@@ -4,11 +4,13 @@ import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { PNG } from 'pngjs';
+import type {
+  GeneratedStageId as StageId,
+  RunKind,
+} from '../shared/generation.js';
 import type { Project } from '../shared/projects.js';
 
-type StageId = 'design_brief' | 'concept_screens' | 'prd';
 type StageKey = 'designBrief' | 'conceptScreens' | 'prd';
-type RunKind = 'initial' | 'regeneration' | 'variation';
 
 const stageIdByKey: Record<StageKey, StageId> = {
   designBrief: 'design_brief',
