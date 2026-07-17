@@ -189,6 +189,17 @@ export function ProjectWorkspace({
     prd: 'PRD',
     promotion: 'promotion',
   }[fullProgress?.currentStage ?? candidate?.currentStage ?? 'design_brief'];
+  const fullProgressLabel = fullProgress
+    ? {
+        generating: fullStageName,
+        validating: 'Validating Candidate Workflow',
+        awaiting_warning_review: 'Reviewing Candidate Workflow warnings',
+        promoting: 'Promoting Candidate Workflow',
+        completed: 'Candidate Workflow promoted',
+        failed: 'Candidate Workflow failed',
+        cancelled: 'Candidate Workflow cancelled',
+      }[fullProgress.phase]
+    : fullStageName;
 
   return (
     <div className={styles['project-workspace']}>
@@ -330,7 +341,7 @@ export function ProjectWorkspace({
                 aria-live="polite"
               >
                 <div>
-                  <strong>{fullStageName}{fullProgress?.currentOrdinal ? ` · Screen ${fullProgress.currentOrdinal} of 3` : ''}</strong>
+                  <strong>{fullProgressLabel}{fullProgress?.currentOrdinal ? ` · Screen ${fullProgress.currentOrdinal} of 3` : ''}</strong>
                   <span>{fullProgress?.completedOperationCount ?? candidate?.completedOperationCount ?? 0} of 5 operations complete · {elapsedSeconds}s elapsed</span>
                 </div>
                 <progress value={fullProgress?.completedOperationCount ?? candidate?.completedOperationCount ?? 0} max={5} />

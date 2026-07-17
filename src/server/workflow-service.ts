@@ -814,7 +814,6 @@ export async function openWorkflowService(
       database.exec('ROLLBACK;');
       throw error;
     }
-    emitCandidateProgress(candidate, 'completed', null, null, 5);
     return readProjectWorkflow(candidate.project_id);
   }
 

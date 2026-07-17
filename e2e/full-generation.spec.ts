@@ -21,6 +21,17 @@ test('Author generates the complete workflow atomically with one action', async 
     page,
     'Authors need a bounded way to turn one product insight into a coherent planning workflow.',
   );
+  await page.evaluate(() => {
+    const observed: string[] = [];
+    (window as typeof window & { fullGenerationAnnouncements?: string[] })
+      .fullGenerationAnnouncements = observed;
+    new MutationObserver(() => {
+      const label = document.querySelector(
+        '[aria-label="Generating complete workflow"] strong',
+      )?.textContent;
+      if (label && observed.at(-1) !== label) observed.push(label);
+    }).observe(document.body, { childList: true, subtree: true, characterData: true });
+  });
 
   await startFullGeneration(page);
 
@@ -29,6 +40,11 @@ test('Author generates the complete workflow atomically with one action', async 
   await expect(progress).toContainText(/Design Brief|Concept Screens|PRD/);
   await expect(page.getByRole('button', { name: 'Cancel after current operation' })).toBeVisible();
   await expect(progress).toHaveCount(0, { timeout: 15_000 });
+  const announcements = await page.evaluate(() => (
+    window as typeof window & { fullGenerationAnnouncements?: string[] }
+  ).fullGenerationAnnouncements ?? []);
+  expect(announcements).toContain('Validating Candidate Workflow');
+  expect(announcements).toContain('Promoting Candidate Workflow');
 
   await expect(page.getByRole('button', { name: /Design Brief/ })).toContainText('Current');
   await expect(page.getByRole('button', { name: /Concept Screens/ })).toContainText('Current');
