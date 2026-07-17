@@ -288,7 +288,7 @@ export function ProjectWorkspace({
   }
 
   async function generateRevision(): Promise<void> {
-    const next = await workflow.generateInsightRevision();
+    const next = await workflow.generateCandidateFromInsightRevision();
     if (!next.insightRevision && !next.candidate) {
       applyPromotedProject(await onRevisionPromoted());
     }

@@ -190,7 +190,7 @@ export interface WorkflowService {
   ): Promise<ProjectWorkflow>;
   beginInsightRevision(projectId: string): ProjectWorkflow;
   updateInsightRevision(projectId: string, insightSource: string): ProjectWorkflow;
-  generateInsightRevision(projectId: string): Promise<ProjectWorkflow>;
+  generateCandidateFromInsightRevision(projectId: string): Promise<ProjectWorkflow>;
   discardInsightRevision(projectId: string): ProjectWorkflow;
   resumeFullWorkflow(projectId: string): Promise<ProjectWorkflow>;
   promoteFullWorkflow(projectId: string): ProjectWorkflow;
@@ -2439,7 +2439,7 @@ export async function openWorkflowService(
       return readProjectWorkflow(projectId);
     },
 
-    async generateInsightRevision(projectId) {
+    async generateCandidateFromInsightRevision(projectId) {
       const project = requireProject(projectId);
       const revision = insightRevisionRow(projectId);
       if (!revision) {

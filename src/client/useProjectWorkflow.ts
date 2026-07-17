@@ -35,7 +35,7 @@ export interface ProjectWorkflowController {
   regenerateWorkflow(startStage: GeneratedStageId): Promise<ProjectWorkflow>;
   beginInsightRevision(): Promise<ProjectWorkflow>;
   updateInsightRevision(insightSource: string): Promise<ProjectWorkflow>;
-  generateInsightRevision(): Promise<ProjectWorkflow>;
+  generateCandidateFromInsightRevision(): Promise<ProjectWorkflow>;
   discardInsightRevision(): Promise<ProjectWorkflow>;
   resumeFullWorkflow(): Promise<ProjectWorkflow>;
   promoteFullWorkflow(): Promise<ProjectWorkflow>;
@@ -240,7 +240,7 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
       return next;
     },
 
-    async generateInsightRevision() {
+    async generateCandidateFromInsightRevision() {
       return runFullGeneration(
         `/api/projects/${projectId}/insight-revisions/active/generation`,
       );

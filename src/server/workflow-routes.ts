@@ -210,7 +210,7 @@ export function registerWorkflowRoutes(
       try {
         await options.beforeGeneration?.();
         return reply.status(201).send(
-          await workflows.generateInsightRevision(request.params.id),
+          await workflows.generateCandidateFromInsightRevision(request.params.id),
         );
       } catch (error) {
         return handleWorkflowError(error, reply);

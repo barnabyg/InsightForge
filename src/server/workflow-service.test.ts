@@ -1627,7 +1627,7 @@ describe('Workflow service', () => {
     const partial = await workflows.generateDesignBrief(project.id);
     workflows.beginInsightRevision(project.id);
     workflows.updateInsightRevision(project.id, revisedInsight);
-    let candidate = await workflows.generateInsightRevision(project.id);
+    let candidate = await workflows.generateCandidateFromInsightRevision(project.id);
     while (candidate.candidate?.status === 'paused') {
       candidate = await workflows.resumeFullWorkflow(project.id);
     }
@@ -1646,7 +1646,7 @@ describe('Workflow service', () => {
     })]);
   });
 
-  it('resumes an Insight Revision candidate and promotes its source and workflow atomically', async () => {
+  it('resumes a Candidate Workflow for an Insight Revision and promotes atomically', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);
     const projects = await openProjectService(dataDirectory);
@@ -1702,7 +1702,7 @@ describe('Workflow service', () => {
     workflows.updateInsightRevision(project.id, revisedInsight);
 
     failRevision = true;
-    await expect(workflows.generateInsightRevision(project.id)).rejects.toMatchObject({
+    await expect(workflows.generateCandidateFromInsightRevision(project.id)).rejects.toMatchObject({
       code: 'openai_request_failed',
     });
     expect(workflows.getProjectWorkflow(project.id)).toMatchObject({
@@ -1752,7 +1752,7 @@ describe('Workflow service', () => {
     expect(promoted.prd?.id).not.toBe(original.prd?.id);
   });
 
-  it('discards an incomplete Insight Revision candidate without changing the current workflow', async () => {
+  it('discards an incomplete Candidate Workflow for an Insight Revision safely', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);
     const projects = await openProjectService(dataDirectory);
@@ -1803,7 +1803,7 @@ describe('Workflow service', () => {
     workflows.beginInsightRevision(project.id);
     workflows.updateInsightRevision(project.id, revisedInsight);
     rejectRevision = true;
-    await expect(workflows.generateInsightRevision(project.id)).rejects.toMatchObject({
+    await expect(workflows.generateCandidateFromInsightRevision(project.id)).rejects.toMatchObject({
       code: 'openai_request_failed',
     });
 
