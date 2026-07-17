@@ -42,7 +42,7 @@ import { GenerationBoundaryError } from './generation-boundary.js';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
 import {
   importProjectExport,
-  type ProjectImportLimits,
+  importProjectExportFile,
 } from './project-import.js';
 import { initializeStorage } from './storage.js';
 import {
@@ -58,7 +58,6 @@ interface WorkflowServiceOptions {
   generateImportId?: () => string;
   imageGeneration?: ImageGenerationBoundary;
   now?: () => Date;
-  projectImportLimits?: ProjectImportLimits;
   textGeneration: TextGenerationBoundary;
 }
 
@@ -237,6 +236,7 @@ export interface WorkflowService {
   exportDeliverables(projectId: string): DeliverableExport;
   exportProject(projectId: string): ProjectExport;
   importProject(archive: Buffer): import('../shared/projects.js').Project;
+  importProjectFile(archivePath: string): import('../shared/projects.js').Project;
   generateDesignBrief(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generateConceptScreens(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generatePrd(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
@@ -2036,7 +2036,16 @@ export async function openWorkflowService(
         archive,
         now(),
         options.generateImportId,
-        options.projectImportLimits,
+      );
+    },
+
+    importProjectFile(archivePath) {
+      return importProjectExportFile(
+        database,
+        dataDirectory,
+        archivePath,
+        now(),
+        options.generateImportId,
       );
     },
 

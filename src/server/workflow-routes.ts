@@ -1,11 +1,9 @@
+import { createWriteStream, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import type { FastifyInstance, FastifyReply } from 'fastify';
 import type { WorkflowRerunRequest } from '../shared/generation.js';
-import {
-  defaultProjectImportLimits,
-  projectImportLimitError,
-  ProjectImportError,
-  type ProjectImportLimits,
-} from './project-import.js';
+import { ProjectImportError } from './project-import.js';
 import {
   WorkflowGenerationError,
   WorkflowProjectNotFoundError,
@@ -27,7 +25,11 @@ interface InsightRevisionPatch {
 
 export interface WorkflowRouteOptions {
   beforeGeneration?: () => Promise<void>;
-  projectImportLimits?: ProjectImportLimits;
+}
+
+interface ProjectImportUpload {
+  archivePath: string;
+  directory: string;
 }
 
 function handleWorkflowError(error: unknown, reply: FastifyReply) {
@@ -59,39 +61,63 @@ export function registerWorkflowRoutes(
   workflows: WorkflowService,
   options: WorkflowRouteOptions = {},
 ): void {
-  const importLimits = options.projectImportLimits ?? defaultProjectImportLimits;
   app.addContentTypeParser(
     'application/zip',
     { bodyLimit: Number.MAX_SAFE_INTEGER },
     (_request, stream, done) => {
-      const chunks: Buffer[] = [];
-      let byteSize = 0;
-      let oversized = false;
-      stream.on('data', (chunk: Buffer) => {
-        byteSize += chunk.byteLength;
-        if (byteSize > importLimits.maxArchiveBytes) {
-          oversized = true;
-          chunks.length = 0;
-        } else if (!oversized) {
-          chunks.push(chunk);
-        }
+      let directory: string;
+      try {
+        directory = mkdtempSync(join(tmpdir(), 'insightforge-project-import-'));
+      } catch (error) {
+        done(null, new ProjectImportError(
+          'project_import_archive_invalid',
+          `The selected Project Export could not be staged. ${
+            error instanceof Error ? error.message : ''
+          }`.trim(),
+        ));
+        return;
+      }
+      const archivePath = join(directory, 'project-export.zip');
+      const output = createWriteStream(archivePath, { flags: 'wx' });
+      let settled = false;
+      const fail = (error?: unknown) => {
+        if (settled) return;
+        settled = true;
+        const cleanup = () => rmSync(directory, { recursive: true, force: true });
+        if (output.closed) cleanup();
+        else output.once('close', cleanup);
+        output.destroy();
+        done(null, new ProjectImportError(
+          'project_import_archive_invalid',
+          `The selected Project Export could not be staged. ${
+            error instanceof Error ? error.message : ''
+          }`.trim(),
+        ));
+      };
+      output.once('error', fail);
+      output.once('finish', () => {
+        if (settled) return;
+        settled = true;
+        done(null, { archivePath, directory } satisfies ProjectImportUpload);
       });
-      stream.once('error', () => done(null, new ProjectImportError(
-        'project_import_archive_invalid',
-        'The selected file could not be read as a Project Export archive.',
-      )));
-      stream.once('end', () => done(null, oversized
-        ? projectImportLimitError(importLimits.maxArchiveBytes, 'archive')
-        : Buffer.concat(chunks, byteSize)));
+      stream.once('error', fail);
+      stream.once('aborted', fail);
+      stream.pipe(output);
     },
   );
 
-  app.post<{ Body: Buffer | ProjectImportError }>(
+  app.post<{ Body: ProjectImportUpload | ProjectImportError }>(
     '/api/project-imports',
     async (request, reply) => {
       try {
         if (request.body instanceof ProjectImportError) throw request.body;
-        return reply.status(201).send(workflows.importProject(request.body));
+        try {
+          return reply.status(201).send(
+            workflows.importProjectFile(request.body.archivePath),
+          );
+        } finally {
+          rmSync(request.body.directory, { recursive: true, force: true });
+        }
       } catch (error) {
         return handleWorkflowError(error, reply);
       }

@@ -1,8 +1,18 @@
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  closeSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  readSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { strFromU8, unzipSync } from 'fflate';
+import { strFromU8, Unzip, UnzipInflate } from 'fflate';
 import { PNG } from 'pngjs';
 import type {
   CandidateWorkflow,
@@ -151,6 +161,16 @@ interface ProjectExportManifest {
   };
 }
 
+interface ArchiveFiles {
+  paths: string[];
+  read(path: string): Buffer | undefined;
+}
+
+interface ExtractedArchive {
+  directory: string;
+  files: ArchiveFiles;
+}
+
 export class ProjectImportError extends Error {
   readonly code: string;
 
@@ -159,28 +179,6 @@ export class ProjectImportError extends Error {
     this.name = 'ProjectImportError';
     this.code = code;
   }
-}
-
-export interface ProjectImportLimits {
-  maxArchiveBytes: number;
-  maxExpandedBytes: number;
-  maxEntries: number;
-}
-
-export const defaultProjectImportLimits: ProjectImportLimits = {
-  maxArchiveBytes: 256 * 1024 * 1024,
-  maxExpandedBytes: 512 * 1024 * 1024,
-  maxEntries: 10_000,
-};
-
-export function projectImportLimitError(
-  limit: number,
-  kind: 'archive' | 'expanded',
-): ProjectImportError {
-  return new ProjectImportError(
-    'project_import_archive_too_large',
-    `Project Export exceeds the supported ${limit} byte ${kind} limit.`,
-  );
 }
 
 function invalidStructure(message: string): never {
@@ -241,8 +239,107 @@ function errorValue(value: unknown, label: string): ExportError | null {
   };
 }
 
-function readJsonFile(files: Record<string, Uint8Array>, path: string): unknown {
-  const bytes = files[path];
+function extractProjectArchive(
+  dataDirectory: string,
+  feed: (unzip: Unzip) => void,
+): ExtractedArchive {
+  const directory = join(dataDirectory, 'assets', `.extract-${randomUUID()}`);
+  mkdirSync(directory, { recursive: false });
+  const extractedPaths = new Map<string, string>();
+  let entry = 0;
+  try {
+    const unzip = new Unzip((file) => {
+      if (extractedPaths.has(file.name)) {
+        throw new ProjectImportError(
+          'project_import_structure_invalid',
+          `Project Export contains duplicate path ${file.name}.`,
+        );
+      }
+      const extractedPath = join(directory, `entry-${entry}`);
+      entry += 1;
+      extractedPaths.set(file.name, extractedPath);
+      writeFileSync(extractedPath, Buffer.alloc(0), { flag: 'wx' });
+      file.ondata = (error, bytes) => {
+        if (error) throw error;
+        if (bytes.byteLength > 0) appendFileSync(extractedPath, bytes);
+      };
+      file.start();
+    });
+    unzip.register(UnzipInflate);
+    feed(unzip);
+    if (extractedPaths.size === 0) {
+      throw new ProjectImportError(
+        'project_import_archive_invalid',
+        'The selected file is not a readable Project Export archive.',
+      );
+    }
+    return {
+      directory,
+      files: {
+        paths: [...extractedPaths.keys()],
+        read(path) {
+          const extractedPath = extractedPaths.get(path);
+          return extractedPath ? readFileSync(extractedPath) : undefined;
+        },
+      },
+    };
+  } catch (error) {
+    rmSync(directory, { recursive: true, force: true });
+    if (error instanceof ProjectImportError) throw error;
+    throw new ProjectImportError(
+      'project_import_archive_invalid',
+      `The selected Project Export could not be expanded. ${
+        error instanceof Error ? error.message : ''
+      }`.trim(),
+    );
+  }
+}
+
+function extractProjectArchiveBuffer(
+  dataDirectory: string,
+  archive: Buffer,
+): ExtractedArchive {
+  return extractProjectArchive(dataDirectory, (unzip) => {
+    const chunkSize = 1024 * 1024;
+    if (archive.byteLength === 0) {
+      unzip.push(new Uint8Array(), true);
+      return;
+    }
+    for (let offset = 0; offset < archive.byteLength; offset += chunkSize) {
+      const end = Math.min(offset + chunkSize, archive.byteLength);
+      unzip.push(archive.subarray(offset, end), end === archive.byteLength);
+    }
+  });
+}
+
+function extractProjectArchiveFile(
+  dataDirectory: string,
+  archivePath: string,
+): ExtractedArchive {
+  return extractProjectArchive(dataDirectory, (unzip) => {
+    const descriptor = openSync(archivePath, 'r');
+    try {
+      let current = Buffer.allocUnsafe(1024 * 1024);
+      let currentSize = readSync(descriptor, current, 0, current.byteLength, null);
+      if (currentSize === 0) {
+        unzip.push(new Uint8Array(), true);
+        return;
+      }
+      while (currentSize > 0) {
+        const next = Buffer.allocUnsafe(1024 * 1024);
+        const nextSize = readSync(descriptor, next, 0, next.byteLength, null);
+        unzip.push(current.subarray(0, currentSize), nextSize === 0);
+        current = next;
+        currentSize = nextSize;
+      }
+    } finally {
+      closeSync(descriptor);
+    }
+  });
+}
+
+function readJsonFile(files: ArchiveFiles, path: string): unknown {
+  const bytes = files.read(path);
   if (!bytes) invalidStructure(`Project Export is missing ${path}.`);
   try {
     return JSON.parse(strFromU8(bytes)) as unknown;
@@ -259,7 +356,7 @@ function safeArchivePath(path: string): boolean {
 }
 
 function validateManifest(
-  files: Record<string, Uint8Array>,
+  files: ArchiveFiles,
 ): ProjectExportManifest {
   const raw = record(readJsonFile(files, 'manifest.json'), 'manifest.json');
   if (raw.format !== 'insightforge.project-export') {
@@ -300,7 +397,7 @@ function validateManifest(
       invalidStructure(`Integrity metadata for ${path} is invalid.`);
     }
     seen.add(path);
-    const bytes = files[path];
+    const bytes = files.read(path);
     if (!bytes) {
       throw new ProjectImportError(
         'project_import_integrity_invalid',
@@ -318,7 +415,7 @@ function validateManifest(
     }
     return { path, byteSize, sha256 };
   });
-  const archivePaths = Object.keys(files).sort();
+  const archivePaths = [...files.paths].sort();
   const declaredPaths = ['manifest.json', ...seen].sort();
   if (
     archivePaths.length !== declaredPaths.length
@@ -365,7 +462,7 @@ function validateConfiguration(value: unknown, label: string): Record<string, un
 }
 
 function parseProjectExport(
-  files: Record<string, Uint8Array>,
+  files: ArchiveFiles,
   manifest: ProjectExportManifest,
 ): ProjectExportEnvelope {
   const raw = record(readJsonFile(files, 'project.json'), 'project.json');
@@ -549,7 +646,7 @@ function requireReference(map: Map<string, unknown>, id: string | null, label: s
   if (id !== null && !map.has(id)) invalidStructure(`${label} references missing identifier ${id}.`);
 }
 
-function validateReferences(payload: ProjectExportEnvelope, files: Record<string, Uint8Array>): void {
+function validateReferences(payload: ProjectExportEnvelope, files: ArchiveFiles): void {
   const allIds = new Set([payload.project.id]);
   const uniqueId = (id: string, label: string) => {
     if (allIds.has(id)) invalidStructure(`${label} duplicates identifier ${id}.`);
@@ -836,7 +933,7 @@ function validateReferences(payload: ProjectExportEnvelope, files: Record<string
     }
     if (assetPaths.has(asset.archivePath)) invalidStructure(`Binary asset path ${asset.archivePath} is duplicated.`);
     assetPaths.add(asset.archivePath);
-    const bytes = files[asset.archivePath];
+    const bytes = files.read(asset.archivePath);
     if (!bytes || bytes.byteLength !== asset.byteSize) {
       throw new ProjectImportError(
         'project_import_asset_invalid',
@@ -860,7 +957,7 @@ function validateReferences(payload: ProjectExportEnvelope, files: Record<string
     }
   }
   const protectedAssetPaths = new Set(
-    Object.keys(files).filter((path) => path.startsWith('assets/')),
+    files.paths.filter((path) => path.startsWith('assets/')),
   );
   if (
     protectedAssetPaths.size !== assetPaths.size
@@ -919,44 +1016,13 @@ function json(value: unknown): string | null {
   return value === null ? null : JSON.stringify(value);
 }
 
-export function importProjectExport(
+function importExtractedProject(
   database: DatabaseSync,
   dataDirectory: string,
-  archive: Buffer,
+  files: ArchiveFiles,
   importedAt: Date,
-  generateId: () => string = randomUUID,
-  limits: ProjectImportLimits = defaultProjectImportLimits,
+  generateId: () => string,
 ): Project {
-  if (archive.byteLength > limits.maxArchiveBytes) {
-    throw projectImportLimitError(limits.maxArchiveBytes, 'archive');
-  }
-  let files: Record<string, Uint8Array>;
-  try {
-    let entryCount = 0;
-    let expandedBytes = 0;
-    files = unzipSync(archive, {
-      filter(file) {
-        entryCount += 1;
-        expandedBytes += file.originalSize;
-        if (entryCount > limits.maxEntries) {
-          throw new ProjectImportError(
-            'project_import_archive_too_large',
-            `Project Export exceeds the supported ${limits.maxEntries} file limit.`,
-          );
-        }
-        if (expandedBytes > limits.maxExpandedBytes) {
-          throw projectImportLimitError(limits.maxExpandedBytes, 'expanded');
-        }
-        return true;
-      },
-    });
-  } catch (error) {
-    if (error instanceof ProjectImportError) throw error;
-    throw new ProjectImportError(
-      'project_import_archive_invalid',
-      'The selected file is not a readable Project Export archive.',
-    );
-  }
   const manifest = validateManifest(files);
   const payload = parseProjectExport(files, manifest);
   validateReferences(payload, files);
@@ -981,7 +1047,7 @@ export function importProjectExport(
     if (payload.binaryAssets.length > 0) {
       mkdirSync(stagingDirectory, { recursive: false });
       for (const asset of payload.binaryAssets) {
-        writeFileSync(join(stagingDirectory, `${assetIds.get(asset.id)!}.png`), files[asset.archivePath]!, {
+        writeFileSync(join(stagingDirectory, `${assetIds.get(asset.id)!}.png`), files.read(asset.archivePath)!, {
           flag: 'wx',
         });
       }
@@ -1154,4 +1220,46 @@ export function importProjectExport(
     createdAt: timestamp,
     updatedAt: timestamp,
   };
+}
+
+export function importProjectExport(
+  database: DatabaseSync,
+  dataDirectory: string,
+  archive: Buffer,
+  importedAt: Date,
+  generateId: () => string = randomUUID,
+): Project {
+  const extracted = extractProjectArchiveBuffer(dataDirectory, archive);
+  try {
+    return importExtractedProject(
+      database,
+      dataDirectory,
+      extracted.files,
+      importedAt,
+      generateId,
+    );
+  } finally {
+    rmSync(extracted.directory, { recursive: true, force: true });
+  }
+}
+
+export function importProjectExportFile(
+  database: DatabaseSync,
+  dataDirectory: string,
+  archivePath: string,
+  importedAt: Date,
+  generateId: () => string = randomUUID,
+): Project {
+  const extracted = extractProjectArchiveFile(dataDirectory, archivePath);
+  try {
+    return importExtractedProject(
+      database,
+      dataDirectory,
+      extracted.files,
+      importedAt,
+      generateId,
+    );
+  } finally {
+    rmSync(extracted.directory, { recursive: true, force: true });
+  }
 }

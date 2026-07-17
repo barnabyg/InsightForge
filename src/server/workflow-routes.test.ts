@@ -730,34 +730,4 @@ describe('Workflow HTTP API', () => {
     expect(library.json()[0]).toMatchObject({ id: sourceId, name: 'Rollback Source' });
   });
 
-  it('returns an app-owned error when a Project Export exceeds resource limits', async () => {
-    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
-    temporaryDirectories.push(dataDirectory);
-    const app = await buildApp({
-      dataDirectory,
-      mode: 'mock',
-      projectImportLimits: {
-        maxArchiveBytes: 32,
-        maxExpandedBytes: 64,
-        maxEntries: 4,
-      },
-    });
-    apps.push(app);
-
-    const imported = await app.inject({
-      method: 'POST',
-      url: '/api/project-imports',
-      headers: {
-        host: 'localhost:4317',
-        'content-type': 'application/zip',
-      },
-      payload: Buffer.alloc(33),
-    });
-
-    expect(imported.statusCode).toBe(400);
-    expect(imported.json()).toEqual({
-      code: 'project_import_archive_too_large',
-      error: 'Project Export exceeds the supported 32 byte archive limit.',
-    });
-  });
 });

@@ -26,13 +26,11 @@ import {
 } from './workflow-service.js';
 import { registerWorkflowRoutes } from './workflow-routes.js';
 import type { ApplicationMode } from '../shared/bootstrap.js';
-import type { ProjectImportLimits } from './project-import.js';
 
 export interface BuildAppOptions {
   dataDirectory?: string;
   generateImportId?: () => string;
   mode?: ApplicationMode;
-  projectImportLimits?: ProjectImportLimits;
   apiKey?: string;
   now?: () => Date;
   checkOpenAI?: () => Promise<CompletedConnectivityState>;
@@ -99,7 +97,6 @@ export async function buildApp(
   const workflowService = await openWorkflowService(dataDirectory, {
     generateImportId: options.generateImportId,
     now,
-    projectImportLimits: options.projectImportLimits,
     textGeneration,
     imageGeneration: options.imageGeneration
       ?? (mode === 'mock'
@@ -140,7 +137,6 @@ export async function buildApp(
     modelCatalog,
   );
   registerWorkflowRoutes(app, workflowService, {
-    projectImportLimits: options.projectImportLimits,
     beforeGeneration: async () => {
       const state = await connectivity.refresh();
       if (state.state !== 'connected') {

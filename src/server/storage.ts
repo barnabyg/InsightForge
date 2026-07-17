@@ -348,15 +348,16 @@ export async function initializeStorage(
     const assetEntries = await readdir(join(dataDirectory, 'assets'), {
       withFileTypes: true,
     });
-    const importerDirectory = /^(\.)?import-([0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
+    const importerDirectory = /^(?:(\.)?import-(?<projectId>[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})|\.extract-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})$/;
     for (const entry of assetEntries) {
       if (!entry.isDirectory()) continue;
       const match = importerDirectory.exec(entry.name);
       if (!match) continue;
-      const staging = match[1] === '.';
+      const projectId = match.groups?.projectId;
+      const staging = match[1] === '.' || projectId === undefined;
       const projectExists = !staging && Boolean(database.prepare(
         'SELECT 1 FROM projects WHERE id = ? LIMIT 1',
-      ).get(match[2]));
+      ).get(projectId));
       if (!projectExists) {
         await rm(join(dataDirectory, 'assets', entry.name), {
           recursive: true,
