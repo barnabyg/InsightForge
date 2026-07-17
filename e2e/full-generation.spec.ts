@@ -88,7 +88,8 @@ test('Author regenerates an affected suffix and deliberately requests a Variatio
   await expect(update).toContainText('shared Stage Prompt changed');
   await expect(update).toContainText('Design Brief, Concept Screens, PRD together');
   await update.getByText('Inspect fingerprints').click();
-  await expect(update.getByText(/Current [a-f0-9]{64}/)).toBeVisible();
+  await expect(update.getByText(/Previous input: [a-f0-9]{64}/)).toBeVisible();
+  await expect(update.getByText(/Current prompt: [a-f0-9]{64}/)).toBeVisible();
 
   await page.getByRole('button', { name: 'Regenerate from here' }).click();
   const regeneration = page.getByRole('dialog', { name: 'Regenerate from Design Brief?' });

@@ -1188,6 +1188,13 @@ describe('Workflow service', () => {
       model: 'gpt-5.4-mini',
       imageQuality: null,
     });
+    const currentPrdConfiguration = configuration.getWorkflowConfiguration()
+      .stages.find(({ id }) => id === 'prd')!;
+    configuration.commitStageConfiguration('prd', {
+      prompt: `${currentPrdConfiguration.prompt}\nCall out unresolved product risks.`,
+      model: currentPrdConfiguration.model,
+      imageQuality: null,
+    });
     configuration.close();
 
     const update = workflows.getProjectWorkflow(project.id);
@@ -1197,19 +1204,25 @@ describe('Workflow service', () => {
       changes: [
         { stageId: 'design_brief', kind: 'prompt' },
         { stageId: 'design_brief', kind: 'model' },
+        { stageId: 'prd', kind: 'prompt' },
       ],
     });
-    expect(update.rerunPlan?.fingerprints.previous.combined).not.toBe(
-      update.rerunPlan?.fingerprints.current.combined,
+    expect(update.rerunPlan?.fingerprints.map(({ stageId }) => stageId)).toEqual([
+      'design_brief',
+      'prd',
+    ]);
+    const designBriefFingerprints = update.rerunPlan?.fingerprints[0];
+    expect(designBriefFingerprints?.previous.combined).not.toBe(
+      designBriefFingerprints?.current.combined,
     );
-    expect(update.rerunPlan?.fingerprints.previous.input).toBe(
-      update.rerunPlan?.fingerprints.current.input,
+    expect(designBriefFingerprints?.previous.input).toBe(
+      designBriefFingerprints?.current.input,
     );
-    expect(update.rerunPlan?.fingerprints.previous.prompt).not.toBe(
-      update.rerunPlan?.fingerprints.current.prompt,
+    expect(designBriefFingerprints?.previous.prompt).not.toBe(
+      designBriefFingerprints?.current.prompt,
     );
-    expect(update.rerunPlan?.fingerprints.previous.model).not.toBe(
-      update.rerunPlan?.fingerprints.current.model,
+    expect(designBriefFingerprints?.previous.model).not.toBe(
+      designBriefFingerprints?.current.model,
     );
     await expect(workflows.regenerateWorkflow(project.id, 'prd')).rejects.toThrow(
       'Regenerate from Design Brief to include every changed stage.',

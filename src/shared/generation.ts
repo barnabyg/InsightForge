@@ -142,10 +142,11 @@ export interface WorkflowRerunPlan {
     kind: WorkflowChangeKind;
     message: string;
   }>;
-  fingerprints: {
+  fingerprints: Array<{
+    stageId: GeneratedStageId;
     previous: WorkflowFingerprint;
     current: WorkflowFingerprint;
-  };
+  }>;
 }
 
 export interface WorkflowSnapshotSummary {

@@ -929,7 +929,9 @@ export async function openWorkflowService(
       earliestChangedStage,
       affectedStages: generatedStages.slice(generatedStages.indexOf(earliestChangedStage)),
       changes,
-      fingerprints: fingerprints.get(earliestChangedStage)!,
+      fingerprints: generatedStages
+        .filter((stageId) => changes.some((change) => change.stageId === stageId))
+        .map((stageId) => ({ stageId, ...fingerprints.get(stageId)! })),
     };
   }
 

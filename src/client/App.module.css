@@ -1706,6 +1706,16 @@ a {
   font-size: 10px;
 }
 
+.fingerprint-comparison {
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid #d7ddef;
+}
+
+.fingerprint-comparison > strong {
+  margin-bottom: 4px;
+}
+
 .artifact-empty {
   min-height: 430px;
   padding: 58px;

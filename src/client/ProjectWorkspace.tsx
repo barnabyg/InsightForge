@@ -342,8 +342,10 @@ export function ProjectWorkspace({
           <strong>{generatedStageNames[stageId]} inputs or configuration changed</strong>
         </div>
         <ul>
-          {rerunPlan.changes.filter((change) => change.stageId === stageId).map((change) => (
-            <li key={`${change.stageId}-${change.kind}`}>{change.message}</li>
+          {rerunPlan.changes.map((change) => (
+            <li key={`${change.stageId}-${change.kind}`}>
+              {generatedStageNames[change.stageId]} · {change.message}
+            </li>
           ))}
         </ul>
         <p>
@@ -352,8 +354,17 @@ export function ProjectWorkspace({
         </p>
         <details>
           <summary>Inspect fingerprints</summary>
-          <code>Current {rerunPlan.fingerprints.previous.combined}</code>
-          <code>Next {rerunPlan.fingerprints.current.combined}</code>
+          {rerunPlan.fingerprints.map((comparison) => (
+            <div className={styles['fingerprint-comparison']} key={comparison.stageId}>
+              <strong>{generatedStageNames[comparison.stageId]}</strong>
+              {(['input', 'prompt', 'model', 'settings'] as const).map((kind) => (
+                <div key={kind}>
+                  <code>Previous {kind}: {comparison.previous[kind]}</code>
+                  <code>Current {kind}: {comparison.current[kind]}</code>
+                </div>
+              ))}
+            </div>
+          ))}
         </details>
       </section>
     );
