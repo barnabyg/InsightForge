@@ -2443,7 +2443,7 @@ describe('Workflow service', () => {
     expect(strFromU8(files['manifest.json'])).not.toContain('insightforge.sqlite');
   });
 
-  it('exports a complete versioned Project backup with integrity metadata', async () => {
+  it('exports a complete versioned Project Export with integrity metadata', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);
     const projects = await openProjectService(dataDirectory, {
@@ -2461,16 +2461,16 @@ describe('Workflow service', () => {
         async generateDesignBrief() {
           return {
             markdown: '# Design Brief\n\nA portable comparison workflow.',
-            responseId: 'resp_backup_brief',
-            requestId: 'req_backup_brief',
+            responseId: 'resp_project_export_brief',
+            requestId: 'req_project_export_brief',
             usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
           };
         },
         async generatePrd() {
           return {
             markdown: '# PRD\n\nThe Author can preserve a complete decision record.',
-            responseId: 'resp_backup_prd',
-            requestId: 'req_backup_prd',
+            responseId: 'resp_project_export_prd',
+            requestId: 'req_project_export_prd',
             usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
           };
         },
@@ -2479,8 +2479,8 @@ describe('Workflow service', () => {
         async generateConceptScreen(input) {
           return {
             png: pngs[input.ordinal - 1],
-            responseId: `resp_backup_screen_${input.ordinal}`,
-            requestId: `req_backup_screen_${input.ordinal}`,
+            responseId: `resp_project_export_screen_${input.ordinal}`,
+            requestId: `req_project_export_screen_${input.ordinal}`,
             usage: { inputTokens: 50, outputTokens: 60, totalTokens: 110 },
           };
         },
@@ -2512,7 +2512,7 @@ describe('Workflow service', () => {
     });
     configuration.close();
 
-    const exported = workflows.exportProjectBackup(project.id);
+    const exported = workflows.exportProject(project.id);
     const files = unzipSync(exported.bytes);
     const manifestText = strFromU8(files['manifest.json']);
     const projectText = strFromU8(files['project.json']);
@@ -2527,7 +2527,7 @@ describe('Workflow service', () => {
         files: Array<{ path: string; byteSize: number; sha256: string }>;
       };
     };
-    const backup = JSON.parse(projectText) as {
+    const projectExport = JSON.parse(projectText) as {
       schemaVersion: number;
       project: { id: string; name: string; insightSource: string };
       currentWorkflow: { artifactIds: Record<string, string> };
@@ -2547,16 +2547,16 @@ describe('Workflow service', () => {
       }>;
     };
 
-    expect(exported.fileName).toBe('portable-retrofit-project-backup.zip');
+    expect(exported.fileName).toBe('portable-retrofit-project-project-export.zip');
     expect(manifest).toMatchObject({
-      format: 'insightforge.project-backup',
+      format: 'insightforge.project-export',
       schemaVersion: 1,
       application: { name: 'InsightForge', version: '0.1.0' },
       project: { id: project.id, name: 'Portable Retrofit Project' },
       contents: { project: 'project.json', assets: 'assets/' },
       integrity: { algorithm: 'sha256' },
     });
-    expect(backup).toMatchObject({
+    expect(projectExport).toMatchObject({
       schemaVersion: 1,
       project: {
         id: project.id,
@@ -2564,18 +2564,18 @@ describe('Workflow service', () => {
         insightSource: project.insightSource,
       },
     });
-    expect(Object.keys(backup.currentWorkflow.artifactIds).sort()).toEqual([
+    expect(Object.keys(projectExport.currentWorkflow.artifactIds).sort()).toEqual([
       'conceptScreens',
       'designBrief',
       'prd',
     ]);
-    expect(backup.workflowSnapshots).toHaveLength(1);
-    expect(Object.keys(backup.workflowSnapshots[0]!.artifactIds).sort()).toEqual([
+    expect(projectExport.workflowSnapshots).toHaveLength(1);
+    expect(Object.keys(projectExport.workflowSnapshots[0]!.artifactIds).sort()).toEqual([
       'conceptScreens',
       'designBrief',
       'prd',
     ]);
-    expect(backup.candidates).toEqual([
+    expect(projectExport.candidates).toEqual([
       expect.objectContaining({
         id: resumable.candidate!.id,
         status: 'paused',
@@ -2585,11 +2585,11 @@ describe('Workflow service', () => {
         }),
       }),
     ]);
-    expect(backup.artifacts).toHaveLength(7);
-    expect(backup.stageRuns).toHaveLength(7);
-    expect(backup.binaryAssets).toHaveLength(6);
+    expect(projectExport.artifacts).toHaveLength(7);
+    expect(projectExport.stageRuns).toHaveLength(7);
+    expect(projectExport.binaryAssets).toHaveLength(6);
 
-    const payloadPaths = ['project.json', ...backup.binaryAssets.map(({ archivePath }) =>
+    const payloadPaths = ['project.json', ...projectExport.binaryAssets.map(({ archivePath }) =>
       archivePath)].sort();
     expect(Object.keys(files).sort()).toEqual(['manifest.json', ...payloadPaths].sort());
     expect(manifest.integrity.files.map(({ path }) => path).sort()).toEqual(payloadPaths);

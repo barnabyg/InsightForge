@@ -354,10 +354,10 @@ export function registerWorkflowRoutes(
   );
 
   app.get<{ Params: ProjectParameters }>(
-    '/api/projects/:id/backup',
+    '/api/projects/:id/export',
     async (request, reply) => {
       try {
-        const exported = workflows.exportProjectBackup(request.params.id);
+        const exported = workflows.exportProject(request.params.id);
         return reply
           .type('application/zip')
           .header(

@@ -54,19 +54,21 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
   const renamedCard = page.getByRole('article', {
     name: 'Confident retrofit choices',
   });
-  const backupDownload = page.waitForEvent('download');
-  await renamedCard.getByRole('link', { name: 'Export Project backup' }).click();
-  const backup = await backupDownload;
-  expect(backup.suggestedFilename()).toBe('confident-retrofit-choices-backup.zip');
-  const backupPath = await backup.path();
-  expect(backupPath).not.toBeNull();
-  const backupFiles = unzipSync(await readFile(backupPath!));
-  expect(JSON.parse(strFromU8(backupFiles['manifest.json']))).toMatchObject({
-    format: 'insightforge.project-backup',
+  const projectExportDownload = page.waitForEvent('download');
+  await renamedCard.getByRole('link', { name: 'Export Project' }).click();
+  const projectExport = await projectExportDownload;
+  expect(projectExport.suggestedFilename()).toBe(
+    'confident-retrofit-choices-project-export.zip',
+  );
+  const projectExportPath = await projectExport.path();
+  expect(projectExportPath).not.toBeNull();
+  const projectExportFiles = unzipSync(await readFile(projectExportPath!));
+  expect(JSON.parse(strFromU8(projectExportFiles['manifest.json']))).toMatchObject({
+    format: 'insightforge.project-export',
     schemaVersion: 1,
     project: { name: 'Confident retrofit choices' },
   });
-  expect(JSON.parse(strFromU8(backupFiles['project.json']))).toMatchObject({
+  expect(JSON.parse(strFromU8(projectExportFiles['project.json']))).toMatchObject({
     project: {
       name: 'Confident retrofit choices',
       insightSource: '# Installer confidence\n\nQuotes hide important trade-offs.',

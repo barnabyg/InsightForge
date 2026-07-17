@@ -529,7 +529,7 @@ describe('Workflow HTTP API', () => {
     expect(Object.keys(files)).toContain('manifest.json');
   });
 
-  it('downloads a complete Project backup without generation or an OpenAI check', async () => {
+  it('downloads a complete Project Export without generation or an OpenAI check', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
     temporaryDirectories.push(dataDirectory);
     let connectivityChecks = 0;
@@ -560,19 +560,19 @@ describe('Workflow HTTP API', () => {
 
     const exported = await app.inject({
       method: 'GET',
-      url: `/api/projects/${projectId}/backup`,
+      url: `/api/projects/${projectId}/export`,
       headers: { host: 'localhost:4317' },
     });
 
     expect(exported.statusCode).toBe(200);
     expect(exported.headers['content-type']).toBe('application/zip');
     expect(exported.headers['content-disposition']).toBe(
-      'attachment; filename="portable-project-backup.zip"',
+      'attachment; filename="portable-project-project-export.zip"',
     );
     expect(connectivityChecks).toBe(checksBeforeExport);
     const files = unzipSync(exported.rawPayload);
     expect(JSON.parse(strFromU8(files['manifest.json']))).toMatchObject({
-      format: 'insightforge.project-backup',
+      format: 'insightforge.project-export',
       schemaVersion: 1,
       project: { id: projectId, name: 'Portable Project' },
     });

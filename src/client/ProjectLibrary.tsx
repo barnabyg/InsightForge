@@ -140,10 +140,10 @@ export function ProjectLibrary({
                   <time dateTime={project.updatedAt}>Updated {formatActivity(project.updatedAt)}</time>
                   <div className={styles['project-actions']}>
                     <a
-                      aria-label="Export Project backup"
-                      href={`/api/projects/${project.id}/backup`}
+                      aria-label="Export Project"
+                      href={`/api/projects/${project.id}/export`}
                       download
-                    >Backup</a>
+                    >Export</a>
                     {project.prdPresent && (
                       <a
                         aria-label="Export project deliverables"

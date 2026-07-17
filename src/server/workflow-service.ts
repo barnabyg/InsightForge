@@ -174,21 +174,21 @@ interface WorkflowSnapshotRow {
   prd_artifact_id: string | null;
 }
 
-interface ProjectBackupRow extends ProjectRow {
+interface ProjectExportRow extends ProjectRow {
   created_at: string;
   updated_at: string;
   name_is_automatic: number;
 }
 
-interface BackupArtifactRow extends ArtifactRow {
+interface ExportArtifactRow extends ArtifactRow {
   stage_id: GeneratedStageId;
 }
 
-interface BackupRunRow extends RunRow {
+interface ExportRunRow extends RunRow {
   stage_id: GeneratedStageId;
 }
 
-interface BackupConceptOperationRow extends ConceptOperationRow {
+interface ExportConceptOperationRow extends ConceptOperationRow {
   run_id: string;
 }
 
@@ -229,7 +229,7 @@ export interface WorkflowService {
   deleteWorkflowSnapshot(projectId: string, snapshotId: string): Promise<ProjectWorkflow>;
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
   exportDeliverables(projectId: string): DeliverableExport;
-  exportProjectBackup(projectId: string): ProjectBackupExport;
+  exportProject(projectId: string): ProjectExport;
   generateDesignBrief(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generateConceptScreens(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
   generatePrd(projectId: string, candidateId?: string): Promise<ProjectWorkflow>;
@@ -264,7 +264,7 @@ export interface DeliverableExport {
   bytes: Buffer;
 }
 
-export interface ProjectBackupExport {
+export interface ProjectExport {
   fileName: string;
   bytes: Buffer;
 }
@@ -1776,13 +1776,13 @@ export async function openWorkflowService(
       return readFileSync(join(dataDirectory, asset.relative_path));
     },
 
-    exportProjectBackup(projectId) {
+    exportProject(projectId) {
       requireProject(projectId);
       const project = database.prepare(`
         SELECT id, name, insight_source, created_at, updated_at, name_is_automatic
         FROM projects
         WHERE id = ?
-      `).get(projectId) as unknown as ProjectBackupRow;
+      `).get(projectId) as unknown as ProjectExportRow;
       const currentArtifacts = database.prepare(`
         SELECT stage_id, artifact_id
         FROM current_artifacts
@@ -1819,20 +1819,20 @@ export async function openWorkflowService(
         FROM artifacts
         WHERE project_id = ?
         ORDER BY created_at, rowid
-      `).all(projectId) as unknown as BackupArtifactRow[];
+      `).all(projectId) as unknown as ExportArtifactRow[];
       const runs = database.prepare(`
         SELECT *
         FROM stage_runs
         WHERE project_id = ?
         ORDER BY started_at, rowid
-      `).all(projectId) as unknown as BackupRunRow[];
+      `).all(projectId) as unknown as ExportRunRow[];
       const operations = database.prepare(`
         SELECT operation.*
         FROM concept_screen_operations AS operation
         JOIN stage_runs AS run ON run.id = operation.run_id
         WHERE run.project_id = ?
         ORDER BY run.started_at, run.rowid, operation.ordinal
-      `).all(projectId) as unknown as BackupConceptOperationRow[];
+      `).all(projectId) as unknown as ExportConceptOperationRow[];
       const assets = database.prepare(`
         SELECT id, project_id, run_id, relative_path, media_type, byte_size,
                width, height, created_at
@@ -1862,7 +1862,7 @@ export async function openWorkflowService(
         height: asset.height,
         createdAt: asset.created_at,
       }));
-      const backup = {
+      const projectExport = {
         schemaVersion: 1,
         exportedAt,
         project: {
@@ -1985,7 +1985,7 @@ export async function openWorkflowService(
         })),
         binaryAssets,
       };
-      const projectBytes = strToU8(`${JSON.stringify(backup, null, 2)}\n`);
+      const projectBytes = strToU8(`${JSON.stringify(projectExport, null, 2)}\n`);
       const assetFiles = assets.map((asset, index) => ({
         path: binaryAssets[index]!.archivePath,
         bytes: readFileSync(join(dataDirectory, asset.relative_path)),
@@ -1995,7 +1995,7 @@ export async function openWorkflowService(
         ...assetFiles,
       ];
       const manifest = {
-        format: 'insightforge.project-backup',
+        format: 'insightforge.project-export',
         schemaVersion: 1,
         application: applicationMetadata,
         exportedAt,
@@ -2016,7 +2016,7 @@ export async function openWorkflowService(
         'manifest.json': strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
       }, { level: 6 });
       return {
-        fileName: `${fileNameSlug(project.name)}-backup.zip`,
+        fileName: `${fileNameSlug(project.name)}-project-export.zip`,
         bytes: Buffer.from(archive),
       };
     },
