@@ -267,6 +267,12 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
           { method: 'POST' },
         );
       }
+      if (next.candidate?.status === 'awaiting_promotion') {
+        next = await requestWorkflow(
+          `/api/projects/${projectId}/full-generations/promotion`,
+          { method: 'POST' },
+        );
+      }
       setWorkflow(next);
       return next;
     } catch (generationError) {

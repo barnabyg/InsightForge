@@ -141,7 +141,10 @@ export async function initializeStorage(
         project_id TEXT NOT NULL UNIQUE
           REFERENCES projects(id) ON DELETE CASCADE,
         status TEXT NOT NULL CHECK (
-          status IN ('running', 'paused', 'failed', 'cancelled', 'awaiting_warning_review')
+          status IN (
+            'running', 'paused', 'failed', 'cancelled',
+            'awaiting_promotion', 'awaiting_warning_review'
+          )
         ),
         current_stage TEXT NOT NULL CHECK (
           current_stage IN ('design_brief', 'concept_screens', 'prd', 'promotion')

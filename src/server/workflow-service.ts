@@ -836,7 +836,14 @@ export async function openWorkflowService(
       emitCandidateProgress(updated, 'awaiting_warning_review', 'promotion', null, 5);
       return readProjectWorkflow(candidate.project_id);
     }
-    return promoteCandidate(candidate);
+    updateCandidate(candidate.id, {
+      status: 'awaiting_promotion',
+      currentStage: 'promotion',
+      completedOperationCount: 5,
+      warnings: [],
+      error: null,
+    });
+    return readProjectWorkflow(candidate.project_id);
   }
 
   function readProjectWorkflow(projectId: string): ProjectWorkflow {
@@ -903,7 +910,9 @@ export async function openWorkflowService(
         : candidate
           ? candidate.status === 'awaiting_warning_review'
             ? 'Review the Candidate Workflow warnings before promotion.'
-            : 'Resume or discard the existing Candidate Workflow first.'
+            : candidate.status === 'awaiting_promotion'
+              ? 'The Candidate Workflow is ready for promotion.'
+              : 'Resume or discard the existing Candidate Workflow first.'
           : hasPrd
             ? 'Use safe regeneration to replace a complete current workflow.'
           : null,
@@ -2143,9 +2152,12 @@ export async function openWorkflowService(
     promoteFullWorkflow(projectId) {
       requireProject(projectId);
       const candidate = requireCandidate(projectId);
-      if (candidate.status !== 'awaiting_warning_review') {
+      if (
+        candidate.status !== 'awaiting_promotion'
+        && candidate.status !== 'awaiting_warning_review'
+      ) {
         throw new WorkflowValidationError(
-          'The Candidate Workflow is not awaiting warning review.',
+          'The Candidate Workflow is not ready for promotion.',
         );
       }
       return promoteCandidate(candidate);

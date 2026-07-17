@@ -349,6 +349,8 @@ export function ProjectWorkspace({
                   <strong>
                     {candidate.status === 'awaiting_warning_review'
                       ? 'Candidate ready for warning review'
+                      : candidate.status === 'awaiting_promotion'
+                        ? 'Candidate ready for promotion'
                       : candidate.status === 'running'
                         ? 'Candidate generation continues'
                       : candidate.status === 'paused'
@@ -373,7 +375,8 @@ export function ProjectWorkspace({
                     <button className={styles['secondary-action']} type="button" onClick={() => {
                       void workflow.cancelFullWorkflow().catch(() => undefined);
                     }}>Cancel after current operation</button>
-                  ) : candidate.status === 'awaiting_warning_review' ? (
+                  ) : candidate.status === 'awaiting_warning_review'
+                    || candidate.status === 'awaiting_promotion' ? (
                     <button className={styles['primary-action']} type="button" onClick={() => {
                       void workflow.promoteFullWorkflow().catch(() => undefined);
                     }}>Promote Candidate Workflow</button>

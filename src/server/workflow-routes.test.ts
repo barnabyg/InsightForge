@@ -248,9 +248,18 @@ describe('Workflow HTTP API', () => {
       status: 'paused',
       currentStage: 'prd',
     });
-    const generated = await app.inject({
+    const awaitingPromotion = await app.inject({
       method: 'POST',
       url: `/api/projects/${projectId}/full-generations/resume`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(awaitingPromotion.json().candidate).toMatchObject({
+      status: 'awaiting_promotion',
+      currentStage: 'promotion',
+    });
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/promotion`,
       headers: { host: 'localhost:4317' },
     });
 

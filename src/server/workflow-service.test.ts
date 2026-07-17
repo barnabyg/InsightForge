@@ -1051,7 +1051,7 @@ describe('Workflow service', () => {
     );
 
     releasePrd();
-    const generated = await generation;
+    const awaitingPromotion = await generation;
 
     expect(calls).toEqual([
       'design_brief',
@@ -1060,6 +1060,17 @@ describe('Workflow service', () => {
       'concept_screen_3',
       'prd',
     ]);
+    expect(awaitingPromotion).toMatchObject({
+      designBrief: null,
+      conceptScreenSet: null,
+      prd: null,
+      candidate: {
+        status: 'awaiting_promotion',
+        currentStage: 'promotion',
+        completedOperationCount: 5,
+      },
+    });
+    const generated = workflows.promoteFullWorkflow(project.id);
     expect(generated).toMatchObject({
       designBrief: { markdown: longBrief.trim() },
       conceptScreenSet: { screens: [{ ordinal: 1 }, { ordinal: 2 }, { ordinal: 3 }] },
@@ -1150,7 +1161,9 @@ describe('Workflow service', () => {
       'prd',
     ]);
 
-    const resumed = await workflows.resumeFullWorkflow(project.id);
+    const resumedCandidate = await workflows.resumeFullWorkflow(project.id);
+    expect(resumedCandidate.candidate).toMatchObject({ status: 'awaiting_promotion' });
+    const resumed = workflows.promoteFullWorkflow(project.id);
 
     expect(calls).toEqual([
       'design_brief',
@@ -1314,7 +1327,9 @@ describe('Workflow service', () => {
       status: 'paused',
       currentStage: 'prd',
     });
-    const resumed = await workflows.resumeFullWorkflow(project.id);
+    const resumedCandidate = await workflows.resumeFullWorkflow(project.id);
+    expect(resumedCandidate.candidate).toMatchObject({ status: 'awaiting_promotion' });
+    const resumed = workflows.promoteFullWorkflow(project.id);
 
     expect(calls).toEqual([
       'design_brief',
