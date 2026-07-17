@@ -260,7 +260,13 @@ export function useProjectWorkflow(projectId: string): ProjectWorkflowController
           resolve();
         };
       });
-      const next = await requestWorkflow(url, { method: 'POST' });
+      let next = await requestWorkflow(url, { method: 'POST' });
+      while (next.candidate?.status === 'paused') {
+        next = await requestWorkflow(
+          `/api/projects/${projectId}/full-generations/resume`,
+          { method: 'POST' },
+        );
+      }
       setWorkflow(next);
       return next;
     } catch (generationError) {

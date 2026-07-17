@@ -230,13 +230,31 @@ describe('Workflow HTTP API', () => {
     });
     const projectId = created.json().id as string;
 
-    const generated = await app.inject({
+    const afterDesignBrief = await app.inject({
       method: 'POST',
       url: `/api/projects/${projectId}/full-generations`,
       headers: { host: 'localhost:4317' },
     });
+    expect(afterDesignBrief.json().candidate).toMatchObject({
+      status: 'paused',
+      currentStage: 'concept_screens',
+    });
+    const afterConceptScreens = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/resume`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(afterConceptScreens.json().candidate).toMatchObject({
+      status: 'paused',
+      currentStage: 'prd',
+    });
+    const generated = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/resume`,
+      headers: { host: 'localhost:4317' },
+    });
 
-    expect(generated.statusCode).toBe(201);
+    expect(generated.statusCode).toBe(200);
     expect(generated.json()).toMatchObject({
       projectId,
       candidate: null,

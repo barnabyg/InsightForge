@@ -351,6 +351,8 @@ export function ProjectWorkspace({
                       ? 'Candidate ready for warning review'
                       : candidate.status === 'running'
                         ? 'Candidate generation continues'
+                      : candidate.status === 'paused'
+                        ? 'Candidate paused safely'
                       : candidate.status === 'cancelled'
                         ? 'Candidate cancelled safely'
                         : 'Candidate generation failed'}

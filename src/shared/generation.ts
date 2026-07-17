@@ -218,7 +218,7 @@ export interface CandidateWarning {
 export interface CandidateWorkflow {
   id: string;
   projectId: string;
-  status: 'running' | 'failed' | 'cancelled' | 'awaiting_warning_review';
+  status: 'running' | 'paused' | 'failed' | 'cancelled' | 'awaiting_warning_review';
   currentStage: GeneratedStageId | 'promotion';
   completedOperationCount: number;
   totalOperationCount: 5;

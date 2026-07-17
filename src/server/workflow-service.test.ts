@@ -44,6 +44,17 @@ describe('Workflow service', () => {
     };
   }
 
+  async function completeFullWorkflow(
+    workflows: WorkflowService,
+    projectId: string,
+  ) {
+    let workflow = await workflows.generateFullWorkflow(projectId);
+    while (workflow.candidate?.status === 'paused') {
+      workflow = await workflows.resumeFullWorkflow(projectId);
+    }
+    return workflow;
+  }
+
   it('generates, validates, and persists a read-only Design Brief with complete provenance', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);
@@ -1003,7 +1014,26 @@ describe('Workflow service', () => {
     });
     workflowServices.push(workflows);
 
-    const generation = workflows.generateFullWorkflow(project.id);
+    const afterDesignBrief = await workflows.generateFullWorkflow(project.id);
+    expect(calls).toEqual(['design_brief']);
+    expect(afterDesignBrief.candidate).toMatchObject({
+      status: 'paused',
+      currentStage: 'concept_screens',
+      completedOperationCount: 1,
+    });
+    const afterConceptScreens = await workflows.resumeFullWorkflow(project.id);
+    expect(calls).toEqual([
+      'design_brief',
+      'concept_screen_1',
+      'concept_screen_2',
+      'concept_screen_3',
+    ]);
+    expect(afterConceptScreens.candidate).toMatchObject({
+      status: 'paused',
+      currentStage: 'prd',
+      completedOperationCount: 4,
+    });
+    const generation = workflows.resumeFullWorkflow(project.id);
     await waitForPrd;
 
     expect(workflows.getProjectWorkflow(project.id)).toMatchObject({
@@ -1098,7 +1128,7 @@ describe('Workflow service', () => {
     });
     workflowServices.push(workflows);
 
-    await expect(workflows.generateFullWorkflow(project.id)).rejects.toMatchObject({
+    await expect(completeFullWorkflow(workflows, project.id)).rejects.toMatchObject({
       code: 'openai_request_failed',
     });
     expect(workflows.getProjectWorkflow(project.id)).toMatchObject({
@@ -1178,7 +1208,7 @@ describe('Workflow service', () => {
     });
     workflowServices.push(workflows);
 
-    const awaitingReview = await workflows.generateFullWorkflow(project.id);
+    const awaitingReview = await completeFullWorkflow(workflows, project.id);
 
     expect(awaitingReview).toMatchObject({
       designBrief: null,
@@ -1258,7 +1288,9 @@ describe('Workflow service', () => {
     });
     workflowServices.push(workflows);
 
-    const generation = workflows.generateFullWorkflow(project.id);
+    const afterDesignBrief = await workflows.generateFullWorkflow(project.id);
+    expect(afterDesignBrief.candidate).toMatchObject({ status: 'paused' });
+    const generation = workflows.resumeFullWorkflow(project.id);
     await waitForFirstScreen;
     expect(workflows.cancelFullWorkflow(project.id)).toBe(true);
     releaseFirstScreen();
@@ -1277,6 +1309,11 @@ describe('Workflow service', () => {
     expect(calls).toEqual(['design_brief', 'concept_screen_1']);
 
     hold = false;
+    const afterConceptScreens = await workflows.resumeFullWorkflow(project.id);
+    expect(afterConceptScreens.candidate).toMatchObject({
+      status: 'paused',
+      currentStage: 'prd',
+    });
     const resumed = await workflows.resumeFullWorkflow(project.id);
 
     expect(calls).toEqual([

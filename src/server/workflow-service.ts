@@ -959,16 +959,22 @@ export async function openWorkflowService(
     });
     updateCandidate(candidate.id, { status: 'running', error: null });
     try {
+      let result: ProjectWorkflow;
       if (!candidate.design_brief_artifact_id) {
-        return await service.generateDesignBrief(candidate.project_id, candidate.id);
+        result = await service.generateDesignBrief(candidate.project_id, candidate.id);
+      } else if (!candidate.concept_screen_artifact_id) {
+        result = await service.generateConceptScreens(candidate.project_id, candidate.id);
+      } else if (!candidate.prd_artifact_id) {
+        result = await service.generatePrd(candidate.project_id, candidate.id);
+      } else {
+        result = finishCandidate(candidate.id);
       }
-      if (!candidate.concept_screen_artifact_id) {
-        return await service.generateConceptScreens(candidate.project_id, candidate.id);
+      const current = candidateRow(candidate.project_id);
+      if (current?.id === candidate.id && current.status === 'running') {
+        updateCandidate(candidate.id, { status: 'paused', error: null });
+        return readProjectWorkflow(candidate.project_id);
       }
-      if (!candidate.prd_artifact_id) {
-        return await service.generatePrd(candidate.project_id, candidate.id);
-      }
-      return finishCandidate(candidate.id);
+      return result;
     } catch (error) {
       const cancellation = error instanceof WorkflowCancellationError
         || (error instanceof WorkflowGenerationError && error.code === 'cancelled');
@@ -1189,7 +1195,7 @@ export async function openWorkflowService(
       if (candidate && activeFullRuns.get(projectId)?.cancelRequested) {
         throw new WorkflowCancellationError();
       }
-      return service.generateConceptScreens(projectId, candidate?.id);
+      return readProjectWorkflow(projectId);
     },
 
     getConceptScreenAsset(projectId, assetId) {
@@ -1786,11 +1792,8 @@ export async function openWorkflowService(
       }
 
       activeConceptRuns.delete(projectId);
-      if (candidate) {
-        if (activeFullRuns.get(projectId)?.cancelRequested) {
-          throw new WorkflowCancellationError();
-        }
-        return service.generatePrd(projectId, candidate.id);
+      if (candidate && activeFullRuns.get(projectId)?.cancelRequested) {
+        throw new WorkflowCancellationError();
       }
       return readProjectWorkflow(projectId);
     },
@@ -2120,9 +2123,13 @@ export async function openWorkflowService(
     async resumeFullWorkflow(projectId) {
       requireProject(projectId);
       const candidate = requireCandidate(projectId);
-      if (candidate.status !== 'failed' && candidate.status !== 'cancelled') {
+      if (
+        candidate.status !== 'paused'
+        && candidate.status !== 'failed'
+        && candidate.status !== 'cancelled'
+      ) {
         throw new WorkflowValidationError(
-          'Only a failed or cancelled Candidate Workflow can be resumed.',
+          'Only a paused, failed, or cancelled Candidate Workflow can be resumed.',
         );
       }
       if (activeFullRuns.has(projectId)) {
