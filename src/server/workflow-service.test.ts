@@ -1356,9 +1356,9 @@ describe('Workflow service', () => {
     const restored = workflows.restoreWorkflowSnapshot(project.id, summary.id);
 
     expect(restored).toMatchObject({
-      designBrief: { id: original.designBrief?.id },
-      conceptScreenSet: { id: original.conceptScreenSet?.id },
-      prd: { id: original.prd?.id },
+      designBrief: { markdown: original.designBrief?.markdown },
+      conceptScreenSet: { screens: original.conceptScreenSet?.screens },
+      prd: { markdown: original.prd?.markdown },
       snapshots: [
         {
           preservedBy: 'restoration',
@@ -1372,6 +1372,12 @@ describe('Workflow service', () => {
         expect.objectContaining({ id: summary.id }),
       ],
     });
+    expect(restored.designBrief?.id).not.toBe(original.designBrief?.id);
+    expect(restored.conceptScreenSet?.id).not.toBe(original.conceptScreenSet?.id);
+    expect(restored.prd?.id).not.toBe(original.prd?.id);
+    expect(restored.designBrief?.runId).toBe(original.designBrief?.runId);
+    expect(restored.conceptScreenSet?.runId).toBe(original.conceptScreenSet?.runId);
+    expect(restored.prd?.runId).toBe(original.prd?.runId);
     expect(workflows.getWorkflowSnapshot(project.id, summary.id).id).toBe(summary.id);
     const unchangedConfiguration = await openWorkflowConfigurationService(dataDirectory);
     expect(unchangedConfiguration.getWorkflowConfiguration()

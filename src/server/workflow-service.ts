@@ -971,19 +971,41 @@ export async function openWorkflowService(
           currentPrd?.id ?? null,
         );
       }
+      const copyArtifact = database.prepare(`
+        INSERT INTO artifacts (
+          id, project_id, stage_id, run_id, markdown, created_at, validation_json
+        )
+        SELECT ?, project_id, stage_id, run_id, markdown, created_at, validation_json
+        FROM artifacts
+        WHERE id = ? AND project_id = ?
+      `);
+      const restoredArtifactId = (artifactId: string | null) => {
+        if (!artifactId) return null;
+        const copiedId = randomUUID();
+        const result = copyArtifact.run(copiedId, artifactId, projectId);
+        if (result.changes !== 1) {
+          throw new WorkflowValidationError(
+            'Workflow Snapshot contains an unavailable Artifact.',
+          );
+        }
+        return copiedId;
+      };
+      const restoredDesignBriefId = restoredArtifactId(selected.design_brief_artifact_id);
+      const restoredConceptScreensId = restoredArtifactId(selected.concept_screen_artifact_id);
+      const restoredPrdId = restoredArtifactId(selected.prd_artifact_id);
       database.prepare('DELETE FROM current_artifacts WHERE project_id = ?').run(projectId);
       const setCurrent = database.prepare(`
         INSERT INTO current_artifacts (project_id, stage_id, artifact_id)
         VALUES (?, ?, ?)
       `);
-      if (selected.design_brief_artifact_id) {
-        setCurrent.run(projectId, 'design_brief', selected.design_brief_artifact_id);
+      if (restoredDesignBriefId) {
+        setCurrent.run(projectId, 'design_brief', restoredDesignBriefId);
       }
-      if (selected.concept_screen_artifact_id) {
-        setCurrent.run(projectId, 'concept_screens', selected.concept_screen_artifact_id);
+      if (restoredConceptScreensId) {
+        setCurrent.run(projectId, 'concept_screens', restoredConceptScreensId);
       }
-      if (selected.prd_artifact_id) {
-        setCurrent.run(projectId, 'prd', selected.prd_artifact_id);
+      if (restoredPrdId) {
+        setCurrent.run(projectId, 'prd', restoredPrdId);
       }
       database.prepare(`
         UPDATE projects SET insight_source = ?, updated_at = ? WHERE id = ?
