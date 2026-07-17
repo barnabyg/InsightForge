@@ -287,7 +287,7 @@ export function ProjectWorkspace({
     setSaveState('saved');
   }
 
-  async function generateRevision(): Promise<void> {
+  async function generateCandidateFromRevision(): Promise<void> {
     const next = await workflow.generateCandidateFromInsightRevision();
     if (!next.insightRevision && !next.candidate) {
       applyPromotedProject(await onRevisionPromoted());
@@ -1053,7 +1053,7 @@ export function ProjectWorkspace({
             }}>Back to Insight Revision</button>
             <button className={styles['primary-action']} type="button" onClick={() => {
               setConfirmRevisionGeneration(false);
-              void generateRevision().catch(() => undefined);
+              void generateCandidateFromRevision().catch(() => undefined);
             }}>Generate Candidate Workflow</button>
           </>}
         >
