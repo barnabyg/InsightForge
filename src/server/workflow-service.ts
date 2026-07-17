@@ -299,6 +299,20 @@ function workflowFingerprint(parts: {
   };
 }
 
+function storedRunFingerprint(
+  run: RunRow,
+  stageId: GeneratedStageId,
+): WorkflowFingerprint {
+  return workflowFingerprint({
+    input: stageId === 'prd'
+      ? run.input_lineage_json ?? run.input_snapshot
+      : run.input_snapshot,
+    prompt: run.prompt_snapshot,
+    model: run.model_snapshot,
+    settings: run.settings_json ?? 'null',
+  });
+}
+
 function candidateFromRow(row: CandidateRow | undefined): CandidateWorkflow | null {
   if (!row) return null;
   return {
@@ -857,16 +871,8 @@ export async function openWorkflowService(
       });
       configuration = prdConfiguration();
     }
-    const previousInput = stageId === 'prd'
-      ? run.input_lineage_json ?? run.input_snapshot
-      : run.input_snapshot;
     return {
-      previous: workflowFingerprint({
-        input: previousInput,
-        prompt: run.prompt_snapshot,
-        model: run.model_snapshot,
-        settings: run.settings_json ?? 'null',
-      }),
+      previous: storedRunFingerprint(run, stageId),
       current: workflowFingerprint({
         input: currentInput,
         prompt: configuration.prompt,
@@ -874,6 +880,26 @@ export async function openWorkflowService(
         settings: currentSettings,
       }),
     };
+  }
+
+  function classifyStageRun(
+    projectId: string,
+    stageId: GeneratedStageId,
+    next: {
+      input: string;
+      prompt: string;
+      model: string;
+      settings: string;
+    },
+  ): RunKind {
+    const artifact = currentArtifact(projectId, stageId);
+    if (!artifact) return 'initial';
+    const run = stageRun(artifact.run_id);
+    if (!run) return 'initial';
+    return storedRunFingerprint(run, stageId).combined
+      === workflowFingerprint(next).combined
+      ? 'variation'
+      : 'regeneration';
   }
 
   function rerunPlan(projectId: string): WorkflowRerunPlan | null {
@@ -1273,8 +1299,12 @@ export async function openWorkflowService(
       const configuration = candidate
         ? candidateConfigurations(candidate).designBrief
         : designBriefConfiguration();
-      const runKind: RunKind = candidate?.run_kind
-        ?? (currentArtifact(projectId, 'design_brief') ? 'variation' : 'initial');
+      const runKind = classifyStageRun(projectId, 'design_brief', {
+        input: project.insight_source,
+        prompt: configuration.prompt,
+        model: configuration.model,
+        settings: 'null',
+      });
       const requiresDownstreamCascade = Boolean(candidate) || Boolean(database.prepare(`
         SELECT 1
         FROM current_artifacts
@@ -1626,8 +1656,13 @@ export async function openWorkflowService(
       const configuration = candidate
         ? candidateConfigurations(candidate).conceptScreens
         : conceptScreenConfiguration();
-      const runKind: RunKind = candidate?.run_kind
-        ?? (currentArtifact(projectId, 'concept_screens') ? 'variation' : 'initial');
+      const settingsJson = JSON.stringify({ imageQuality: configuration.image_quality });
+      const runKind = classifyStageRun(projectId, 'concept_screens', {
+        input: designBrief.markdown,
+        prompt: configuration.prompt,
+        model: configuration.model,
+        settings: settingsJson,
+      });
       const assembledRequest = [
         'Stage Prompt:',
         configuration.prompt,
@@ -1635,7 +1670,6 @@ export async function openWorkflowService(
         'Stage Input — Design Brief:',
         designBrief.markdown,
       ].join('\n');
-      const settingsJson = JSON.stringify({ imageQuality: configuration.image_quality });
       const resumableRun = database.prepare(`
         SELECT *
         FROM stage_runs
@@ -2102,8 +2136,6 @@ export async function openWorkflowService(
       const configuration = candidate
         ? candidateConfigurations(candidate).prd
         : prdConfiguration();
-      const runKind: RunKind = candidate?.run_kind
-        ?? (currentArtifact(projectId, 'prd') ? 'variation' : 'initial');
       const stageInput: PrdRun['stageInput'] = {
         designBrief: {
           value: designBrief.markdown,
@@ -2121,6 +2153,12 @@ export async function openWorkflowService(
           })),
         },
       };
+      const runKind = classifyStageRun(projectId, 'prd', {
+        input: JSON.stringify(stageInput),
+        prompt: configuration.prompt,
+        model: configuration.model,
+        settings: 'null',
+      });
       const assembledRequest = [
         'Stage Prompt:',
         configuration.prompt,

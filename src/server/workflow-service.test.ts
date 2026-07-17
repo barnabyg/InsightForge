@@ -1429,6 +1429,63 @@ describe('Workflow service', () => {
     expect(varied.snapshots[0]?.replacedFromStage).toBe('prd');
   });
 
+  it('labels only the unchanged-input stage as variation within a cascaded Variation Run', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'A variation can create new downstream inputs even when its starting input is unchanged.',
+    });
+    let briefVersion = 0;
+    let prdVersion = 0;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          briefVersion += 1;
+          return {
+            markdown: `# Design Brief ${briefVersion}\n\n${'Evidence direction outcome constraint assumption. '.repeat(55)}`,
+            responseId: `resp_brief_${briefVersion}`,
+            requestId: `req_brief_${briefVersion}`,
+            usage: { inputTokens: 10, outputTokens: 20, totalTokens: 30 },
+          };
+        },
+        async generatePrd() {
+          prdVersion += 1;
+          return {
+            markdown: `# PRD ${prdVersion}\n\n${'Requirement rationale acceptance measure dependency. '.repeat(55)}`,
+            responseId: `resp_prd_${prdVersion}`,
+            requestId: `req_prd_${prdVersion}`,
+            usage: { inputTokens: 30, outputTokens: 40, totalTokens: 70 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngFixture(briefVersion * 30 + input.ordinal),
+            requestId: `req_screen_${briefVersion}_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 100, outputTokens: 200, totalTokens: 300 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await completeFullWorkflow(workflows, project.id);
+    workflows.promoteFullWorkflow(project.id);
+
+    let candidate = await workflows.regenerateWorkflow(project.id, 'design_brief');
+    while (candidate.candidate?.status === 'paused') {
+      candidate = await workflows.resumeFullWorkflow(project.id);
+    }
+    const varied = workflows.promoteFullWorkflow(project.id);
+
+    expect(varied.lastDesignBriefRun?.runKind).toBe('variation');
+    expect(varied.lastConceptScreenRun?.runKind).toBe('regeneration');
+    expect(varied.lastPrdRun?.runKind).toBe('regeneration');
+  });
+
   it('resumes a failed Candidate Workflow at the failed operation without automatic retry', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);
