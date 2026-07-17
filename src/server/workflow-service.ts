@@ -24,7 +24,7 @@ import type {
   TextGenerationBoundary,
   TokenUsage,
 } from '../shared/generation.js';
-import type { ImageQuality } from '../shared/workflow-configuration.js';
+import type { ImageQuality, StageId } from '../shared/workflow-configuration.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
 import { initializeStorage } from './storage.js';
@@ -540,6 +540,22 @@ export async function openWorkflowService(
     `).get(projectId));
   }
 
+  function currentArtifact(projectId: string, stageId: StageId): ArtifactRow | undefined {
+    return database.prepare(`
+      SELECT artifact.id, artifact.project_id, artifact.run_id,
+             artifact.markdown, artifact.created_at, artifact.validation_json
+      FROM current_artifacts AS current
+      JOIN artifacts AS artifact ON artifact.id = current.artifact_id
+      WHERE current.project_id = ? AND current.stage_id = ?
+    `).get(projectId, stageId) as unknown as ArtifactRow | undefined;
+  }
+
+  function stageRun(runId: string): RunRow | undefined {
+    return database.prepare(
+      'SELECT * FROM stage_runs WHERE id = ?',
+    ).get(runId) as unknown as RunRow | undefined;
+  }
+
   function readProjectWorkflow(projectId: string): ProjectWorkflow {
     const project = requireProject(projectId);
     const configuration = designBriefConfiguration();
@@ -820,41 +836,17 @@ export async function openWorkflowService(
 
     exportDeliverables(projectId) {
       const project = requireProject(projectId);
-      const designBrief = database.prepare(`
-        SELECT artifact.id, artifact.project_id, artifact.run_id,
-               artifact.markdown, artifact.created_at, artifact.validation_json
-        FROM current_artifacts AS current
-        JOIN artifacts AS artifact ON artifact.id = current.artifact_id
-        WHERE current.project_id = ? AND current.stage_id = 'design_brief'
-      `).get(projectId) as unknown as ArtifactRow | undefined;
-      const conceptScreenSet = database.prepare(`
-        SELECT artifact.id, artifact.project_id, artifact.run_id,
-               artifact.created_at, artifact.validation_json
-        FROM current_artifacts AS current
-        JOIN artifacts AS artifact ON artifact.id = current.artifact_id
-        WHERE current.project_id = ? AND current.stage_id = 'concept_screens'
-      `).get(projectId) as unknown as ConceptArtifactRow | undefined;
-      const prd = database.prepare(`
-        SELECT artifact.id, artifact.project_id, artifact.run_id,
-               artifact.markdown, artifact.created_at, artifact.validation_json
-        FROM current_artifacts AS current
-        JOIN artifacts AS artifact ON artifact.id = current.artifact_id
-        WHERE current.project_id = ? AND current.stage_id = 'prd'
-      `).get(projectId) as unknown as ArtifactRow | undefined;
+      const designBrief = currentArtifact(projectId, 'design_brief');
+      const conceptScreenSet = currentArtifact(projectId, 'concept_screens');
+      const prd = currentArtifact(projectId, 'prd');
       if (!designBrief || !conceptScreenSet || !prd) {
         throw new WorkflowValidationError(
           'Generate the complete workflow before exporting deliverables.',
         );
       }
-      const designBriefRunRow = database.prepare(
-        'SELECT * FROM stage_runs WHERE id = ?',
-      ).get(designBrief.run_id) as unknown as RunRow | undefined;
-      const conceptRunRow = database.prepare(
-        'SELECT * FROM stage_runs WHERE id = ?',
-      ).get(conceptScreenSet.run_id) as unknown as RunRow | undefined;
-      const prdRunRow = database.prepare(
-        'SELECT * FROM stage_runs WHERE id = ?',
-      ).get(prd.run_id) as unknown as RunRow | undefined;
+      const designBriefRunRow = stageRun(designBrief.run_id);
+      const conceptRunRow = stageRun(conceptScreenSet.run_id);
+      const prdRunRow = stageRun(prd.run_id);
       const operations = conceptOperations(conceptScreenSet.run_id);
       const completeOperations = operations.filter((operation) =>
         operation.status === 'succeeded'
