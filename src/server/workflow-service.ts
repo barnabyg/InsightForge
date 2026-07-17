@@ -2443,16 +2443,18 @@ export async function openWorkflowService(
       const project = requireProject(projectId);
       const revision = insightRevisionRow(projectId);
       if (!revision) {
-        throw new WorkflowValidationError('Begin an Insight Revision before generating it.');
+        throw new WorkflowValidationError(
+          'Begin an Insight Revision before generating its Candidate Workflow.',
+        );
       }
       if (!revision.insight_source.trim()) {
         throw new WorkflowValidationError(
-          'Add an Insight Source to the revision before generating it.',
+          'Add an Insight Source to the revision before generating a Candidate Workflow.',
         );
       }
       if (revision.insight_source === project.insight_source) {
         throw new WorkflowValidationError(
-          'Change the Insight Source before generating its revision.',
+          'Change the Insight Source before generating a Candidate Workflow.',
         );
       }
       if (!hasCurrentWorkflow(projectId)) {
