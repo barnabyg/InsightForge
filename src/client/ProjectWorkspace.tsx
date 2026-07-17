@@ -283,6 +283,11 @@ export function ProjectWorkspace({
     error: { label: 'Insight Source save failed', visible: 'Save failed' },
   }[saveState];
   const rerunPlan = workflow.workflow?.rerunPlan ?? null;
+  const hasGeneratedArtifact = Boolean(
+    workflow.workflow?.designBrief
+    || workflow.workflow?.conceptScreenSet
+    || workflow.workflow?.prd,
+  );
   const completeWorkflow = Boolean(
     workflow.workflow?.designBrief
     && workflow.workflow.conceptScreenSet
@@ -549,7 +554,7 @@ export function ProjectWorkspace({
                 <p>Write the raw observation, problem, or opportunity. This is the source for the entire workflow.</p>
               </div>
               <div className={styles['editor-actions']}>
-                {completeWorkflow && (
+                {hasGeneratedArtifact && (
                   <button
                     className={styles['secondary-action']}
                     type="button"
@@ -615,6 +620,7 @@ export function ProjectWorkspace({
               </div>
               {!candidate
                 && !workflow.workflow?.insightRevision
+                && (!hasGeneratedArtifact || completeWorkflow)
                 && workflow.generatingStage !== 'full_generation' && (
                 <button
                   className={completeWorkflow && !rerunPlan
