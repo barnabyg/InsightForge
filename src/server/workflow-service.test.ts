@@ -887,4 +887,66 @@ describe('Workflow service', () => {
     releasePrd();
     await prdGeneration;
   });
+
+  it('rejects PRD generation while a Design Brief rerun is in flight', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({ insightSource: 'Serialize the earliest stage too.' });
+    let briefCalls = 0;
+    let briefRerunStarted!: () => void;
+    let releaseBriefRerun!: () => void;
+    const briefDidStart = new Promise<void>((resolve) => { briefRerunStarted = resolve; });
+    const briefCanFinish = new Promise<void>((resolve) => { releaseBriefRerun = resolve; });
+    let prdCalls = 0;
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        async generateDesignBrief() {
+          briefCalls += 1;
+          if (briefCalls === 2) {
+            briefRerunStarted();
+            await briefCanFinish;
+          }
+          return {
+            markdown: `# Design Brief\n\nVersion ${briefCalls}`,
+            responseId: `resp_held_brief_${briefCalls}`,
+            requestId: `req_held_brief_${briefCalls}`,
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+        async generatePrd() {
+          prdCalls += 1;
+          return {
+            markdown: '# PRD\n\nMust not overlap the Design Brief.',
+            responseId: 'resp_overlap_prd',
+            requestId: 'req_overlap_prd',
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngFixture(input.ordinal * 40),
+            requestId: `req_held_screen_${briefCalls}_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 10, outputTokens: 10, totalTokens: 20 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await workflows.generateDesignBrief(project.id);
+    await workflows.generateConceptScreens(project.id);
+
+    const briefRerun = workflows.generateDesignBrief(project.id);
+    await briefDidStart;
+    await expect(workflows.generatePrd(project.id)).rejects.toThrow(
+      'Design Brief generation is already running for this Project.',
+    );
+    expect(prdCalls).toBe(0);
+    releaseBriefRerun();
+    await briefRerun;
+  });
 });
