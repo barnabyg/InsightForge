@@ -32,6 +32,11 @@ test('Author generates and inspects a persisted PRD from the Design Brief and Co
   await expect(inspector).toContainText('Succeeded');
   await expect(inspector).toContainText('gpt-5.6-luna');
   await expect(inspector).toContainText('3 Concept Screens');
+  await expect(inspector).toContainText('Design Brief run');
+  await expect(inspector).toContainText('Concept Screen Set run');
+  await expect(inspector).toContainText('Screen 1 asset');
+  await expect(inspector).toContainText('Screen 2 asset');
+  await expect(inspector).toContainText('Screen 3 asset');
   await expect(inspector).toContainText('mock_req_');
 
   await page.reload();

@@ -42,8 +42,16 @@ export function RunInspector({ run, generating, elapsedSeconds, stageName }: Run
             {run.stageId === 'prd' && (
               <>
                 <div><dt>Design Brief input</dt><dd><code>{run.stageInput.designBrief.artifactId}</code></dd></div>
+                <div><dt>Design Brief run</dt><dd><code>{run.stageInput.designBrief.runId}</code></dd></div>
                 <div><dt>Visual inputs</dt><dd>{run.stageInput.conceptScreenSet.screens.length} Concept Screens</dd></div>
                 <div><dt>Concept Screen Set</dt><dd><code>{run.stageInput.conceptScreenSet.artifactId}</code></dd></div>
+                <div><dt>Concept Screen Set run</dt><dd><code>{run.stageInput.conceptScreenSet.runId}</code></dd></div>
+                {run.stageInput.conceptScreenSet.screens.map((screen) => (
+                  <div key={screen.assetId}>
+                    <dt>Screen {screen.ordinal} asset</dt>
+                    <dd><code>{screen.assetId}</code></dd>
+                  </div>
+                ))}
               </>
             )}
             {run.validation && (
