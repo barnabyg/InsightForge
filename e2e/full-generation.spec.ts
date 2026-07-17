@@ -26,10 +26,10 @@ test('Author generates the complete workflow atomically with one action', async 
     (window as typeof window & { fullGenerationAnnouncements?: string[] })
       .fullGenerationAnnouncements = observed;
     new MutationObserver(() => {
-      const label = document.querySelector(
-        '[aria-label="Generating complete workflow"] strong',
+      const announcement = document.querySelector(
+        '[role="status"][aria-label="Generating complete workflow"]',
       )?.textContent;
-      if (label && observed.at(-1) !== label) observed.push(label);
+      if (announcement && observed.at(-1) !== announcement) observed.push(announcement);
     }).observe(document.body, { childList: true, subtree: true, characterData: true });
   });
 
@@ -43,8 +43,12 @@ test('Author generates the complete workflow atomically with one action', async 
   const announcements = await page.evaluate(() => (
     window as typeof window & { fullGenerationAnnouncements?: string[] }
   ).fullGenerationAnnouncements ?? []);
-  expect(announcements).toContain('Validating Candidate Workflow');
-  expect(announcements).toContain('Promoting Candidate Workflow');
+  expect(announcements.some((announcement) => (
+    announcement.includes('Validating Candidate Workflow')
+  ))).toBe(true);
+  expect(announcements.some((announcement) => (
+    announcement.includes('Promoting Candidate Workflow')
+  ))).toBe(true);
 
   await expect(page.getByRole('button', { name: /Design Brief/ })).toContainText('Current');
   await expect(page.getByRole('button', { name: /Concept Screens/ })).toContainText('Current');
