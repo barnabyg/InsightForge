@@ -962,6 +962,41 @@ describe('Workflow service', () => {
     await briefRerun;
   });
 
+  it('does not replace a partial current workflow without snapshot preservation', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory);
+    projectServices.push(projects);
+    const project = projects.createProject({
+      insightSource: 'A current partial workflow must remain untouched until safe regeneration exists.',
+    });
+    const workflows = await openWorkflowService(dataDirectory, {
+      textGeneration: {
+        ...prdNotExpected(),
+        async generateDesignBrief() {
+          return {
+            markdown: '# Design Brief\n\nPreserve this current partial workflow.',
+            responseId: 'resp_partial_current_brief',
+            requestId: 'req_partial_current_brief',
+            usage: { inputTokens: 12, outputTokens: 8, totalTokens: 20 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+
+    await workflows.generateDesignBrief(project.id);
+
+    expect(workflows.getProjectWorkflow(project.id)).toMatchObject({
+      canGenerateFullWorkflow: false,
+      fullGenerationBlocker: 'Use safe regeneration to replace a current workflow.',
+      designBrief: { markdown: '# Design Brief\n\nPreserve this current partial workflow.' },
+    });
+    await expect(workflows.generateFullWorkflow(project.id)).rejects.toThrow(
+      'Use safe regeneration to replace a current workflow.',
+    );
+  });
+
   it('generates the complete workflow without exposing partial candidate artifacts', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
     temporaryDirectories.push(dataDirectory);
@@ -1079,10 +1114,10 @@ describe('Workflow service', () => {
     });
     expect(generated).toMatchObject({
       canGenerateFullWorkflow: false,
-      fullGenerationBlocker: 'Use safe regeneration to replace a complete current workflow.',
+      fullGenerationBlocker: 'Use safe regeneration to replace a current workflow.',
     });
     await expect(workflows.generateFullWorkflow(project.id)).rejects.toThrow(
-      'Use safe regeneration to replace a complete current workflow.',
+      'Use safe regeneration to replace a current workflow.',
     );
   });
 

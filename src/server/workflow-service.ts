@@ -709,6 +709,15 @@ export async function openWorkflowService(
     } | undefined;
   }
 
+  function hasCurrentWorkflow(projectId: string): boolean {
+    return Boolean(database.prepare(`
+      SELECT 1
+      FROM current_artifacts
+      WHERE project_id = ?
+      LIMIT 1
+    `).get(projectId));
+  }
+
   function hasCurrentPrd(projectId: string): boolean {
     return Boolean(database.prepare(`
       SELECT 1
@@ -901,10 +910,11 @@ export async function openWorkflowService(
     `).get(projectId) as unknown as RunRow | undefined;
     const hasInsight = project.insight_source.trim().length > 0;
     const hasPrd = Boolean(prdArtifact);
+    const hasWorkflow = hasCurrentWorkflow(projectId);
     const candidate = candidateRow(projectId);
     return {
       projectId,
-      canGenerateFullWorkflow: hasInsight && !candidate && !hasPrd,
+      canGenerateFullWorkflow: hasInsight && !candidate && !hasWorkflow,
       fullGenerationBlocker: !hasInsight
         ? 'Add an Insight Source before starting Full Generation.'
         : candidate
@@ -915,8 +925,8 @@ export async function openWorkflowService(
               : candidate.status === 'warnings_rejected'
                 ? 'The warning-bearing Candidate Workflow is being kept for later.'
               : 'Resume or discard the existing Candidate Workflow first.'
-          : hasPrd
-            ? 'Use safe regeneration to replace a complete current workflow.'
+          : hasWorkflow
+            ? 'Use safe regeneration to replace a current workflow.'
           : null,
       candidate: candidateFromRow(candidate),
       canGenerateDesignBrief: hasInsight && !hasPrd,
@@ -2086,9 +2096,9 @@ export async function openWorkflowService(
           'Add an Insight Source before starting Full Generation.',
         );
       }
-      if (hasCurrentPrd(projectId)) {
+      if (hasCurrentWorkflow(projectId)) {
         throw new WorkflowValidationError(
-          'Use safe regeneration to replace a complete current workflow.',
+          'Use safe regeneration to replace a current workflow.',
         );
       }
       if (candidateRow(projectId)) {
