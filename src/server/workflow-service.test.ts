@@ -2661,6 +2661,33 @@ describe('Workflow service', () => {
       .toThrow('Design Brief does not reference a matching Artifact and Stage Run');
     expect(projects.listProjects()).toHaveLength(1);
 
+    const changedCandidateFiles = unzipSync(exported.bytes);
+    const changedCandidatePayload = JSON.parse(
+      strFromU8(changedCandidateFiles['project.json']),
+    ) as { candidates: Array<{ insightSource: string }> };
+    changedCandidatePayload.candidates[0]!.insightSource =
+      'A different Insight Source introduced after export.';
+    changedCandidateFiles['project.json'] = strToU8(
+      `${JSON.stringify(changedCandidatePayload)}\n`,
+    );
+    const changedCandidateManifest = JSON.parse(
+      strFromU8(changedCandidateFiles['manifest.json']),
+    ) as {
+      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
+    };
+    const changedCandidateIntegrity = changedCandidateManifest.integrity.files
+      .find(({ path }) => path === 'project.json')!;
+    changedCandidateIntegrity.byteSize = changedCandidateFiles['project.json'].byteLength;
+    changedCandidateIntegrity.sha256 = createHash('sha256')
+      .update(changedCandidateFiles['project.json'])
+      .digest('hex');
+    changedCandidateFiles['manifest.json'] = strToU8(
+      `${JSON.stringify(changedCandidateManifest)}\n`,
+    );
+    expect(() => workflows.importProject(Buffer.from(zipSync(changedCandidateFiles))))
+      .toThrow('Insight Source does not match its Project');
+    expect(projects.listProjects()).toHaveLength(1);
+
     const sourceWorkflow = workflows.getProjectWorkflow(project.id);
     const imported = workflows.importProject(exported.bytes);
     const importedWorkflow = workflows.getProjectWorkflow(imported.id);

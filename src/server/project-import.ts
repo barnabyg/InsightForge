@@ -734,6 +734,14 @@ function validateReferences(payload: ProjectExportEnvelope, files: Record<string
   };
   for (const candidate of payload.candidates) {
     const label = `Candidate Workflow ${candidate.id}`;
+    const expectedInsightSource = candidate.insightRevisionId
+      ? revisions.get(candidate.insightRevisionId)!.insightSource
+      : payload.project.insightSource;
+    if (candidate.insightSource !== expectedInsightSource) {
+      invalidStructure(`${label} Insight Source does not match its ${
+        candidate.insightRevisionId ? 'Insight Revision' : 'Project'
+      }.`);
+    }
     validateCandidatePair(
       candidate.designBriefRunId,
       candidate.designBriefArtifactId,
