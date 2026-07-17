@@ -335,6 +335,13 @@ function readJson<T>(value: string | null): T | null {
   return value === null ? null : JSON.parse(value) as T;
 }
 
+function storedError(
+  code: string | null,
+  message: string | null,
+): { code: string; message: string } | null {
+  return code && message ? { code, message } : null;
+}
+
 function candidateFromRow(row: CandidateRow | undefined): CandidateWorkflow | null {
   if (!row) return null;
   return {
@@ -1919,9 +1926,7 @@ export async function openWorkflowService(
           prdRunId: candidate.prd_run_id,
           prdArtifactId: candidate.prd_artifact_id,
           warnings: readJson<CandidateWarning[]>(candidate.warnings_json) ?? [],
-          error: candidate.error_code && candidate.error_message
-            ? { code: candidate.error_code, message: candidate.error_message }
-            : null,
+          error: storedError(candidate.error_code, candidate.error_message),
           startedAt: candidate.started_at,
           updatedAt: candidate.updated_at,
         })),
@@ -1964,9 +1969,7 @@ export async function openWorkflowService(
           validation: readJson<ArtifactValidation | ConceptScreenValidation>(
             run.validation_json,
           ),
-          error: run.error_code && run.error_message
-            ? { code: run.error_code, message: run.error_message }
-            : null,
+          error: storedError(run.error_code, run.error_message),
         })),
         conceptScreenOperations: operations.map((operation) => ({
           runId: operation.run_id,
@@ -1979,9 +1982,7 @@ export async function openWorkflowService(
           responseId: operation.response_id,
           requestId: operation.request_id,
           usage: readJson<TokenUsage>(operation.usage_json),
-          error: operation.error_code && operation.error_message
-            ? { code: operation.error_code, message: operation.error_message }
-            : null,
+          error: storedError(operation.error_code, operation.error_message),
         })),
         binaryAssets,
       };
