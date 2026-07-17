@@ -5,6 +5,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, unzipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import type {
+  CandidateWorkflow,
   GeneratedStageId as StageId,
   RunKind,
 } from '../shared/generation.js';
@@ -60,7 +61,7 @@ interface ProjectExportEnvelope {
     projectId: string;
     runKind: RunKind;
     status: string;
-    currentStage: StageId | 'promotion';
+    currentStage: CandidateWorkflow['currentStage'];
     completedOperationCount: number;
     startStage: StageId;
     insightSource: string;
