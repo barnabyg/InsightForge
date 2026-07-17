@@ -141,6 +141,29 @@ describe('Workflow HTTP API', () => {
     }
   });
 
+  async function generateAndPromoteFullWorkflow(
+    app: FastifyInstance,
+    projectId: string,
+  ) {
+    for (const path of [
+      'full-generations',
+      'full-generations/resume',
+      'full-generations/resume',
+    ]) {
+      const response = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projectId}/${path}`,
+        headers: { host: 'localhost:4317' },
+      });
+      expect(response.statusCode).toBeLessThan(300);
+    }
+    return app.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/promotion`,
+      headers: { host: 'localhost:4317' },
+    });
+  }
+
   it('generates and retrieves a PRD with its upstream lineage through the public workflow resource', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
     temporaryDirectories.push(dataDirectory);
@@ -290,26 +313,7 @@ describe('Workflow HTTP API', () => {
       payload: { name: 'Neighbourhood decisions', insightSource: originalInsight },
     });
     const projectId = created.json().id as string;
-    await app.inject({
-      method: 'POST',
-      url: `/api/projects/${projectId}/full-generations`,
-      headers: { host: 'localhost:4317' },
-    });
-    await app.inject({
-      method: 'POST',
-      url: `/api/projects/${projectId}/full-generations/resume`,
-      headers: { host: 'localhost:4317' },
-    });
-    await app.inject({
-      method: 'POST',
-      url: `/api/projects/${projectId}/full-generations/resume`,
-      headers: { host: 'localhost:4317' },
-    });
-    const original = await app.inject({
-      method: 'POST',
-      url: `/api/projects/${projectId}/full-generations/promotion`,
-      headers: { host: 'localhost:4317' },
-    });
+    const original = await generateAndPromoteFullWorkflow(app, projectId);
 
     const begun = await app.inject({
       method: 'POST',
@@ -387,26 +391,7 @@ describe('Workflow HTTP API', () => {
       },
     });
     const projectId = created.json().id as string;
-    await app.inject({
-      method: 'POST',
-      url: `/api/projects/${projectId}/full-generations`,
-      headers: { host: 'localhost:4317' },
-    });
-    await app.inject({
-      method: 'POST',
-      url: `/api/projects/${projectId}/full-generations/resume`,
-      headers: { host: 'localhost:4317' },
-    });
-    await app.inject({
-      method: 'POST',
-      url: `/api/projects/${projectId}/full-generations/resume`,
-      headers: { host: 'localhost:4317' },
-    });
-    const original = await app.inject({
-      method: 'POST',
-      url: `/api/projects/${projectId}/full-generations/promotion`,
-      headers: { host: 'localhost:4317' },
-    });
+    const original = await generateAndPromoteFullWorkflow(app, projectId);
 
     const variation = await app.inject({
       method: 'POST',
@@ -446,10 +431,7 @@ describe('Workflow HTTP API', () => {
       },
     });
     const projectId = created.json().id as string;
-    await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations`, headers: { host: 'localhost:4317' } });
-    await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations/resume`, headers: { host: 'localhost:4317' } });
-    await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations/resume`, headers: { host: 'localhost:4317' } });
-    const original = await app.inject({ method: 'POST', url: `/api/projects/${projectId}/full-generations/promotion`, headers: { host: 'localhost:4317' } });
+    const original = await generateAndPromoteFullWorkflow(app, projectId);
     await app.inject({
       method: 'POST',
       url: `/api/projects/${projectId}/workflow-reruns`,
@@ -478,9 +460,10 @@ describe('Workflow HTTP API', () => {
     });
     expect(restored.statusCode).toBe(200);
     expect(restored.json()).toMatchObject({
-      prd: { id: original.json().prd.id },
+      prd: { markdown: original.json().prd.markdown },
       snapshots: [{ preservedBy: 'restoration' }, { id: snapshotId }],
     });
+    expect(restored.json().prd.id).not.toBe(original.json().prd.id);
 
     const deleted = await app.inject({
       method: 'DELETE',
