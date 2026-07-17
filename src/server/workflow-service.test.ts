@@ -2609,6 +2609,28 @@ describe('Workflow service', () => {
     expect(archiveText).not.toContain(dataDirectory);
     expect(projectText).not.toContain('relative_path');
 
+    const incoherentFiles = unzipSync(exported.bytes);
+    const incoherentPayload = JSON.parse(strFromU8(incoherentFiles['project.json'])) as {
+      currentWorkflow: { artifactIds: { designBrief: string } };
+      workflowSnapshots: Array<{ artifactIds: { designBrief: string } }>;
+    };
+    incoherentPayload.currentWorkflow.artifactIds.designBrief =
+      incoherentPayload.workflowSnapshots[0]!.artifactIds.designBrief;
+    incoherentFiles['project.json'] = strToU8(`${JSON.stringify(incoherentPayload)}\n`);
+    const incoherentManifest = JSON.parse(strFromU8(incoherentFiles['manifest.json'])) as {
+      integrity: { files: Array<{ path: string; byteSize: number; sha256: string }> };
+    };
+    const incoherentProjectIntegrity = incoherentManifest.integrity.files
+      .find(({ path }) => path === 'project.json')!;
+    incoherentProjectIntegrity.byteSize = incoherentFiles['project.json'].byteLength;
+    incoherentProjectIntegrity.sha256 = createHash('sha256')
+      .update(incoherentFiles['project.json'])
+      .digest('hex');
+    incoherentFiles['manifest.json'] = strToU8(`${JSON.stringify(incoherentManifest)}\n`);
+    expect(() => workflows.importProject(Buffer.from(zipSync(incoherentFiles))))
+      .toThrow('currentWorkflow Concept Screens do not consume its Design Brief');
+    expect(projects.listProjects()).toHaveLength(1);
+
     const sourceWorkflow = workflows.getProjectWorkflow(project.id);
     const imported = workflows.importProject(exported.bytes);
     const importedWorkflow = workflows.getProjectWorkflow(imported.id);

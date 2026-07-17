@@ -562,10 +562,6 @@ function validateReferences(payload: ProjectExportEnvelope, files: Record<string
       }
     }
   };
-  validateArtifactSet(payload.currentWorkflow.artifactIds, 'currentWorkflow.artifactIds');
-  for (const snapshot of payload.workflowSnapshots) {
-    validateArtifactSet(snapshot.artifactIds, `Workflow Snapshot ${snapshot.id}`);
-  }
   for (const candidate of payload.candidates) {
     requireReference(revisions, candidate.insightRevisionId, `Candidate ${candidate.id} insightRevisionId`);
     requireReference(runs, candidate.designBriefRunId, `Candidate ${candidate.id} designBriefRunId`);
@@ -593,6 +589,122 @@ function validateReferences(payload: ProjectExportEnvelope, files: Record<string
     requireReference(assets, operation.assetId, `Concept Screen operation ${key} assetId`);
     if (operation.assetId && assets.get(operation.assetId)!.runId !== operation.runId) {
       invalidStructure(`Concept Screen operation ${key} references an asset from another run.`);
+    }
+  }
+  const successfulConceptOperations = (runId: string, label: string) => {
+    const operations = payload.conceptScreenOperations
+      .filter((operation) => operation.runId === runId && operation.status === 'succeeded')
+      .sort((left, right) => left.ordinal - right.ordinal);
+    if (
+      operations.length !== 3
+      || operations.some((operation, index) =>
+        operation.ordinal !== index + 1 || operation.assetId === null)
+    ) {
+      invalidStructure(`${label} does not contain three usable Concept Screen assets.`);
+    }
+    return operations as Array<typeof operations[number] & { assetId: string }>;
+  };
+  const requireSucceededArtifact = (id: string, stageId: StageId, label: string) => {
+    const artifact = artifacts.get(id);
+    const run = artifact ? runs.get(artifact.runId) : undefined;
+    if (!artifact || artifact.stageId !== stageId || !run || run.status !== 'succeeded') {
+      invalidStructure(`${label} does not reference a successful ${stageId} Artifact.`);
+    }
+    if (stageId === 'concept_screens') {
+      successfulConceptOperations(run.id, label);
+    }
+    return { artifact, run };
+  };
+  const validatePrdLineage = (
+    run: ProjectExportEnvelope['stageRuns'][number],
+    designBriefId: string,
+    conceptScreensId: string,
+    label: string,
+  ) => {
+    const designBrief = artifacts.get(designBriefId)!;
+    const conceptScreens = artifacts.get(conceptScreensId)!;
+    if (run.inputArtifactId !== designBriefId || run.inputRunId !== designBrief.runId) {
+      invalidStructure(`${label} PRD does not consume its Design Brief.`);
+    }
+    const lineage = record(run.inputLineage, `${label} PRD input lineage`);
+    const designLineage = record(lineage.designBrief, `${label} PRD Design Brief lineage`);
+    const conceptLineage = record(
+      lineage.conceptScreenSet,
+      `${label} PRD Concept Screen Set lineage`,
+    );
+    if (
+      designLineage.artifactId !== designBriefId
+      || designLineage.runId !== designBrief.runId
+      || conceptLineage.artifactId !== conceptScreensId
+      || conceptLineage.runId !== conceptScreens.runId
+    ) {
+      invalidStructure(`${label} PRD lineage does not match its upstream Artifacts.`);
+    }
+    const operations = successfulConceptOperations(conceptScreens.runId, label);
+    const screens = array(conceptLineage.screens, `${label} PRD Concept Screen lineage`)
+      .map((screen, index) => record(screen, `${label} PRD screen ${index + 1}`));
+    if (
+      screens.length !== 3
+      || screens.some((screen, index) =>
+        screen.ordinal !== index + 1 || screen.assetId !== operations[index]!.assetId)
+    ) {
+      invalidStructure(`${label} PRD Concept Screen lineage is inconsistent.`);
+    }
+  };
+  const validateCoherentWorkflow = (ids: ArtifactIds, insightSource: string, label: string) => {
+    validateArtifactSet(ids, `${label}.artifactIds`);
+    if (ids.conceptScreens && !ids.designBrief) {
+      invalidStructure(`${label} has Concept Screens without a Design Brief.`);
+    }
+    if (ids.prd && (!ids.designBrief || !ids.conceptScreens)) {
+      invalidStructure(`${label} has a PRD without its complete upstream workflow.`);
+    }
+    const design = ids.designBrief
+      ? requireSucceededArtifact(ids.designBrief, 'design_brief', `${label} Design Brief`)
+      : null;
+    if (design && design.run.input !== insightSource) {
+      invalidStructure(`${label} Design Brief does not consume its Insight Source.`);
+    }
+    const concept = ids.conceptScreens
+      ? requireSucceededArtifact(ids.conceptScreens, 'concept_screens', `${label} Concept Screens`)
+      : null;
+    if (
+      concept && design
+      && (
+        concept.run.inputArtifactId !== design.artifact.id
+        || concept.run.inputRunId !== design.run.id
+        || concept.run.input !== design.artifact.markdown
+      )
+    ) {
+      invalidStructure(`${label} Concept Screens do not consume its Design Brief.`);
+    }
+    const prd = ids.prd
+      ? requireSucceededArtifact(ids.prd, 'prd', `${label} PRD`)
+      : null;
+    if (prd && design && concept) {
+      validatePrdLineage(
+        prd.run,
+        design.artifact.id,
+        concept.artifact.id,
+        label,
+      );
+    }
+  };
+  validateCoherentWorkflow(
+    payload.currentWorkflow.artifactIds,
+    payload.project.insightSource,
+    'currentWorkflow',
+  );
+  for (const snapshot of payload.workflowSnapshots) {
+    validateCoherentWorkflow(
+      snapshot.artifactIds,
+      snapshot.insightSource,
+      `Workflow Snapshot ${snapshot.id}`,
+    );
+  }
+  for (const artifact of payload.artifacts) {
+    if (artifact.stageId === 'concept_screens') {
+      successfulConceptOperations(artifact.runId, `Concept Screen Artifact ${artifact.id}`);
     }
   }
   const assetPaths = new Set<string>();
