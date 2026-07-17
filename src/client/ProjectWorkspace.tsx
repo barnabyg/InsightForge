@@ -304,10 +304,7 @@ export function ProjectWorkspace({
 
   function rerunStartFor(stageId: GeneratedStageId): GeneratedStageId {
     if (!rerunPlan) return stageId;
-    return generatedStageIds.indexOf(stageId)
-      >= generatedStageIds.indexOf(rerunPlan.earliestChangedStage)
-      ? rerunPlan.earliestChangedStage
-      : stageId;
+    return rerunPlan.earliestChangedStage;
   }
 
   function completeWorkflowActionLabel(stageId: GeneratedStageId): string {

@@ -1226,7 +1226,7 @@ describe('Workflow service', () => {
       designBriefFingerprints?.current.model,
     );
     await expect(workflows.regenerateWorkflow(project.id, 'prd')).rejects.toThrow(
-      'Regenerate from Design Brief to include every changed stage.',
+      'Regenerate from Design Brief to begin at the earliest changed stage.',
     );
 
     const afterBrief = await workflows.regenerateWorkflow(project.id, 'design_brief');
@@ -1335,6 +1335,9 @@ describe('Workflow service', () => {
         { stageId: 'concept_screens', kind: 'settings' },
       ],
     });
+    await expect(workflows.regenerateWorkflow(project.id, 'design_brief')).rejects.toThrow(
+      'Regenerate from Concept Screens to begin at the earliest changed stage.',
+    );
 
     cycle = 2;
     let candidate = await workflows.regenerateWorkflow(project.id, 'concept_screens');

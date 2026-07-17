@@ -2284,11 +2284,10 @@ export async function openWorkflowService(
       const update = readWorkflowRerunPlan(database, projectId);
       if (
         update
-        && generatedStageIds.indexOf(startStage)
-          > generatedStageIds.indexOf(update.earliestChangedStage)
+        && startStage !== update.earliestChangedStage
       ) {
         throw new WorkflowValidationError(
-          `Regenerate from ${generatedStageNames[update.earliestChangedStage]} to include every changed stage.`,
+          `Regenerate from ${generatedStageNames[update.earliestChangedStage]} to begin at the earliest changed stage.`,
         );
       }
       const candidateId = randomUUID();
