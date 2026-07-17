@@ -137,6 +137,13 @@ export function ProjectLibrary({
                 <footer className={styles['project-card-footer']}>
                   <time dateTime={project.updatedAt}>Updated {formatActivity(project.updatedAt)}</time>
                   <div className={styles['project-actions']}>
+                    {project.prdPresent && (
+                      <a
+                        aria-label="Export project deliverables"
+                        href={`/api/projects/${project.id}/deliverables`}
+                        download
+                      >Export</a>
+                    )}
                     <button type="button" aria-label="Rename project" onClick={() => setRename({ id: project.id, name: project.name })}>Rename</button>
                     <button type="button" aria-label="Duplicate project" disabled={busy} onClick={() => void perform(() => onDuplicate(project.id))}>Duplicate</button>
                     <button type="button" aria-label="Delete project" onClick={() => setDeleting(project)}>Delete</button>

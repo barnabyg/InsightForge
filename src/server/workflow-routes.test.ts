@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
+import { strFromU8, unzipSync } from 'fflate';
 import { buildApp } from './app.js';
 
 describe('Workflow HTTP API', () => {
@@ -211,5 +212,60 @@ describe('Workflow HTTP API', () => {
       headers: { host: 'localhost:4317' },
     });
     expect(retrieved.json().prd).toEqual(generated.json().prd);
+  });
+
+  it('downloads the current deliverables as a named ZIP without an OpenAI check', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    let connectivityChecks = 0;
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'mock',
+      checkOpenAI: async () => {
+        connectivityChecks += 1;
+        return {
+          state: 'connected',
+          message: 'Mock OpenAI is available.',
+          checkedAt: '2026-07-17T08:00:00.000Z',
+        };
+      },
+    });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Requirements from product intent',
+        insightSource: 'People need to compare options and preserve a decision record.',
+      },
+    });
+    const projectId = created.json().id as string;
+    for (const path of ['design-brief-runs', 'concept-screen-runs', 'prd-runs']) {
+      const generated = await app.inject({
+        method: 'POST',
+        url: `/api/projects/${projectId}/${path}`,
+        headers: { host: 'localhost:4317' },
+      });
+      expect(generated.statusCode).toBe(201);
+    }
+    const checksAfterGeneration = connectivityChecks;
+
+    const exported = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}/deliverables`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(exported.statusCode).toBe(200);
+    expect(exported.headers['content-type']).toBe('application/zip');
+    expect(exported.headers['content-disposition']).toBe(
+      'attachment; filename="requirements-from-product-intent-deliverables.zip"',
+    );
+    expect(connectivityChecks).toBe(checksAfterGeneration);
+    const files = unzipSync(exported.rawPayload);
+    expect(strFromU8(files['design-brief.md'])).toContain('# Design Brief');
+    expect(strFromU8(files['prd.md'])).toContain('# Product Requirements Document');
+    expect(Object.keys(files)).toContain('manifest.json');
   });
 });

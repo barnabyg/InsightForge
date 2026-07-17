@@ -43,7 +43,19 @@ test('Author generates and inspects a persisted PRD from the Design Brief and Co
   await page.getByRole('button', { name: /PRD/ }).click();
   await expect(page.getByRole('article', { name: 'PRD Artifact' })).toContainText('FR-001');
   await page.getByRole('link', { name: 'All projects' }).click();
-  await expect(page.getByRole('article').first()).toContainText('PRD ready');
+  const projectCard = page.getByRole('article').filter({
+    hasText: 'understand material trade-offs',
+  });
+  await expect(projectCard).toContainText('PRD ready');
+  await projectCard.getByRole('button', { name: 'Rename project' }).click();
+  await page.getByRole('textbox', { name: 'Project name' }).fill('Retrofit decisions');
+  await page.getByRole('button', { name: 'Save name' }).click();
+  const download = page.waitForEvent('download');
+  await page.getByRole('article', { name: 'Retrofit decisions' })
+    .getByRole('link', { name: 'Export project deliverables' }).click();
+  expect((await download).suggestedFilename()).toBe(
+    'retrofit-decisions-deliverables.zip',
+  );
 });
 
 test('Author sees safe diagnostics when PRD generation fails once', async ({ page }) => {

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs';
 import { writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import { strToU8, zipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import type {
   ArtifactValidation,
@@ -38,6 +39,7 @@ interface WorkflowServiceOptions {
 
 interface ProjectRow {
   id: string;
+  name: string;
   insight_source: string;
 }
 
@@ -111,6 +113,7 @@ interface ConceptOperationRow {
 export interface WorkflowService {
   getProjectWorkflow(projectId: string): ProjectWorkflow;
   getConceptScreenAsset(projectId: string, assetId: string): Buffer;
+  exportDeliverables(projectId: string): DeliverableExport;
   generateDesignBrief(projectId: string): Promise<ProjectWorkflow>;
   generateConceptScreens(projectId: string): Promise<ProjectWorkflow>;
   generatePrd(projectId: string): Promise<ProjectWorkflow>;
@@ -120,6 +123,11 @@ export interface WorkflowService {
     listener: (event: ConceptScreenProgressEvent) => void,
   ): () => void;
   close(): void;
+}
+
+export interface DeliverableExport {
+  fileName: string;
+  bytes: Buffer;
 }
 
 export class WorkflowProjectNotFoundError extends Error {
@@ -169,6 +177,15 @@ function validateMarkdownArtifact(
     wordCount: words,
     warnings,
   };
+}
+
+function fileNameSlug(name: string): string {
+  return name
+    .normalize('NFKD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/gi, '-')
+    .replace(/^-|-$/g, '')
+    .toLowerCase() || 'project';
 }
 
 function validateDesignBrief(markdown: string): ArtifactValidation {
@@ -443,7 +460,7 @@ export async function openWorkflowService(
 
   function requireProject(projectId: string): ProjectRow {
     const project = database.prepare(`
-      SELECT id, insight_source
+      SELECT id, name, insight_source
       FROM projects
       WHERE id = ?
     `).get(projectId) as unknown as ProjectRow | undefined;
@@ -799,6 +816,171 @@ export async function openWorkflowService(
       `).get(assetId, projectId) as unknown as { relative_path: string } | undefined;
       if (!asset) throw new WorkflowProjectNotFoundError(assetId);
       return readFileSync(join(dataDirectory, asset.relative_path));
+    },
+
+    exportDeliverables(projectId) {
+      const project = requireProject(projectId);
+      const designBrief = database.prepare(`
+        SELECT artifact.id, artifact.project_id, artifact.run_id,
+               artifact.markdown, artifact.created_at, artifact.validation_json
+        FROM current_artifacts AS current
+        JOIN artifacts AS artifact ON artifact.id = current.artifact_id
+        WHERE current.project_id = ? AND current.stage_id = 'design_brief'
+      `).get(projectId) as unknown as ArtifactRow | undefined;
+      const conceptScreenSet = database.prepare(`
+        SELECT artifact.id, artifact.project_id, artifact.run_id,
+               artifact.created_at, artifact.validation_json
+        FROM current_artifacts AS current
+        JOIN artifacts AS artifact ON artifact.id = current.artifact_id
+        WHERE current.project_id = ? AND current.stage_id = 'concept_screens'
+      `).get(projectId) as unknown as ConceptArtifactRow | undefined;
+      const prd = database.prepare(`
+        SELECT artifact.id, artifact.project_id, artifact.run_id,
+               artifact.markdown, artifact.created_at, artifact.validation_json
+        FROM current_artifacts AS current
+        JOIN artifacts AS artifact ON artifact.id = current.artifact_id
+        WHERE current.project_id = ? AND current.stage_id = 'prd'
+      `).get(projectId) as unknown as ArtifactRow | undefined;
+      if (!designBrief || !conceptScreenSet || !prd) {
+        throw new WorkflowValidationError(
+          'Generate the complete workflow before exporting deliverables.',
+        );
+      }
+      const designBriefRunRow = database.prepare(
+        'SELECT * FROM stage_runs WHERE id = ?',
+      ).get(designBrief.run_id) as unknown as RunRow | undefined;
+      const conceptRunRow = database.prepare(
+        'SELECT * FROM stage_runs WHERE id = ?',
+      ).get(conceptScreenSet.run_id) as unknown as RunRow | undefined;
+      const prdRunRow = database.prepare(
+        'SELECT * FROM stage_runs WHERE id = ?',
+      ).get(prd.run_id) as unknown as RunRow | undefined;
+      const operations = conceptOperations(conceptScreenSet.run_id);
+      const completeOperations = operations.filter((operation) =>
+        operation.status === 'succeeded'
+        && operation.asset_id
+        && operation.relative_path);
+      if (
+        designBriefRunRow?.status !== 'succeeded'
+        || conceptRunRow?.status !== 'succeeded'
+        || prdRunRow?.status !== 'succeeded'
+        || completeOperations.length !== 3
+      ) {
+        throw new WorkflowValidationError(
+          'Generate the complete workflow before exporting deliverables.',
+        );
+      }
+      const designBriefRun = runFromRow(designBriefRunRow)!;
+      const conceptRun = conceptRunFromRows(conceptRunRow, operations)!;
+      const prdRun = prdRunFromRow(prdRunRow)!;
+      const screenFiles = completeOperations.map((operation) => ({
+        name: `concept-screen-${operation.ordinal}.png`,
+        bytes: readFileSync(join(dataDirectory, operation.relative_path!)),
+      }));
+      const manifest = {
+        schemaVersion: 1,
+        project: {
+          id: project.id,
+          name: project.name,
+        },
+        exportedAt: now().toISOString(),
+        stages: [
+          {
+            stageId: 'design_brief',
+            stage: 'Design Brief',
+            file: 'design-brief.md',
+            artifactId: designBrief.id,
+            runId: designBriefRun.id,
+            generatedAt: designBrief.created_at,
+            model: designBriefRun.model,
+            prompt: designBriefRun.stagePrompt,
+            stageConfigurationUpdatedAt: designBriefRun.stageConfigurationUpdatedAt,
+            startedAt: designBriefRun.startedAt,
+            completedAt: designBriefRun.completedAt,
+            durationMs: designBriefRun.durationMs,
+            requestId: designBriefRun.requestId,
+            responseId: designBriefRun.responseId,
+            usage: designBriefRun.usage,
+            validation: designBriefRun.validation,
+          },
+          {
+            stageId: 'concept_screens',
+            stage: 'Concept Screen Set',
+            files: screenFiles.map(({ name }) => name),
+            artifactId: conceptScreenSet.id,
+            runId: conceptRun.id,
+            generatedAt: conceptScreenSet.created_at,
+            model: conceptRun.model,
+            prompt: conceptRun.stagePrompt,
+            imageQuality: conceptRun.imageQuality,
+            stageConfigurationUpdatedAt: conceptRun.stageConfigurationUpdatedAt,
+            startedAt: conceptRun.startedAt,
+            completedAt: conceptRun.completedAt,
+            durationMs: conceptRun.durationMs,
+            usage: conceptRun.usage,
+            validation: conceptRun.validation,
+            input: {
+              stage: conceptRun.stageInput.name,
+              artifactId: conceptRun.stageInput.artifactId,
+              runId: conceptRun.stageInput.runId,
+            },
+            operations: completeOperations.map((operation) => ({
+              ordinal: operation.ordinal,
+              file: `concept-screen-${operation.ordinal}.png`,
+              assetId: operation.asset_id,
+              completedAt: operation.completed_at,
+              durationMs: operation.duration_ms,
+              width: operation.width,
+              height: operation.height,
+              requestId: operation.request_id,
+              responseId: operation.response_id,
+              usage: readJson<TokenUsage>(operation.usage_json),
+            })),
+          },
+          {
+            stageId: 'prd',
+            stage: 'PRD',
+            file: 'prd.md',
+            artifactId: prd.id,
+            runId: prdRun.id,
+            generatedAt: prd.created_at,
+            model: prdRun.model,
+            prompt: prdRun.stagePrompt,
+            stageConfigurationUpdatedAt: prdRun.stageConfigurationUpdatedAt,
+            startedAt: prdRun.startedAt,
+            completedAt: prdRun.completedAt,
+            durationMs: prdRun.durationMs,
+            requestId: prdRun.requestId,
+            responseId: prdRun.responseId,
+            usage: prdRun.usage,
+            validation: prdRun.validation,
+            input: {
+              designBrief: {
+                artifactId: prdRun.stageInput.designBrief.artifactId,
+                runId: prdRun.stageInput.designBrief.runId,
+              },
+              conceptScreenSet: {
+                artifactId: prdRun.stageInput.conceptScreenSet.artifactId,
+                runId: prdRun.stageInput.conceptScreenSet.runId,
+                assets: prdRun.stageInput.conceptScreenSet.screens.map((screen) => ({
+                  ordinal: screen.ordinal,
+                  assetId: screen.assetId,
+                })),
+              },
+            },
+          },
+        ],
+      };
+      const archive = zipSync({
+        'design-brief.md': strToU8(designBrief.markdown),
+        ...Object.fromEntries(screenFiles.map(({ name, bytes }) => [name, bytes])),
+        'prd.md': strToU8(prd.markdown),
+        'manifest.json': strToU8(`${JSON.stringify(manifest, null, 2)}\n`),
+      }, { level: 6 });
+      return {
+        fileName: `${fileNameSlug(project.name)}-deliverables.zip`,
+        bytes: Buffer.from(archive),
+      };
     },
 
     async generateConceptScreens(projectId) {

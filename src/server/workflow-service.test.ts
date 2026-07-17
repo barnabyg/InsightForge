@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { strFromU8, unzipSync } from 'fflate';
 import { PNG } from 'pngjs';
 import type { ImageGenerationBoundary } from './image-generation-boundary.js';
 import { openProjectService, type ProjectService } from './project-service.js';
@@ -948,5 +949,145 @@ describe('Workflow service', () => {
     expect(prdCalls).toBe(0);
     releaseBriefRerun();
     await briefRerun;
+  });
+
+  it('exports only the current deliverables with readable names and complete provenance', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-'));
+    temporaryDirectories.push(dataDirectory);
+    const projects = await openProjectService(dataDirectory, {
+      now: () => new Date('2026-07-17T08:00:00.000Z'),
+    });
+    projectServices.push(projects);
+    const project = projects.createProject({
+      name: 'Retrofit Decisions',
+      insightSource: 'Homeowners need a defensible way to compare retrofit proposals.',
+    });
+    const configuration = await openWorkflowConfigurationService(dataDirectory, {
+      now: () => new Date('2026-07-17T08:01:00.000Z'),
+    });
+    configuration.commitStageConfiguration('design_brief', {
+      prompt: 'Explain the product opportunity.',
+      model: 'gpt-5.4-mini',
+      imageQuality: null,
+    });
+    configuration.commitStageConfiguration('concept_screens', {
+      prompt: 'Show the primary journey.',
+      model: 'gpt-image-2',
+      imageQuality: 'high',
+    });
+    configuration.commitStageConfiguration('prd', {
+      prompt: 'Turn the approved direction into requirements.',
+      model: 'gpt-5.4-mini',
+      imageQuality: null,
+    });
+    configuration.close();
+    const designBrief = '# Design Brief\n\nA clear comparison journey.';
+    const prd = '# PRD\n\nThe Author can compare proposals and record a decision.';
+    const pngs = [pngFixture(25), pngFixture(75), pngFixture(125)];
+    const workflows = await openWorkflowService(dataDirectory, {
+      now: () => new Date('2026-07-17T08:02:00.000Z'),
+      textGeneration: {
+        async generateDesignBrief() {
+          return {
+            markdown: designBrief,
+            responseId: 'resp_export_brief',
+            requestId: 'req_export_brief',
+            usage: { inputTokens: 11, outputTokens: 12, totalTokens: 23 },
+          };
+        },
+        async generatePrd() {
+          return {
+            markdown: prd,
+            responseId: 'resp_export_prd',
+            requestId: 'req_export_prd',
+            usage: { inputTokens: 31, outputTokens: 32, totalTokens: 63 },
+          };
+        },
+      },
+      imageGeneration: {
+        async generateConceptScreen(input) {
+          return {
+            png: pngs[input.ordinal - 1],
+            requestId: `req_export_screen_${input.ordinal}`,
+            responseId: null,
+            usage: { inputTokens: 20, outputTokens: 30, totalTokens: 50 },
+          };
+        },
+      },
+    });
+    workflowServices.push(workflows);
+    await workflows.generateDesignBrief(project.id);
+    await workflows.generateConceptScreens(project.id);
+    await workflows.generatePrd(project.id);
+
+    const exported = workflows.exportDeliverables(project.id);
+    const files = unzipSync(exported.bytes);
+
+    expect(exported.fileName).toBe('retrofit-decisions-deliverables.zip');
+    expect(Object.keys(files).sort()).toEqual([
+      'concept-screen-1.png',
+      'concept-screen-2.png',
+      'concept-screen-3.png',
+      'design-brief.md',
+      'manifest.json',
+      'prd.md',
+    ]);
+    expect(strFromU8(files['design-brief.md'])).toBe(designBrief);
+    expect(strFromU8(files['prd.md'])).toBe(prd);
+    expect(Buffer.from(files['concept-screen-1.png'])).toEqual(pngs[0]);
+    expect(Buffer.from(files['concept-screen-2.png'])).toEqual(pngs[1]);
+    expect(Buffer.from(files['concept-screen-3.png'])).toEqual(pngs[2]);
+    const manifest = JSON.parse(strFromU8(files['manifest.json'])) as {
+      project: { id: string; name: string };
+      exportedAt: string;
+      stages: Array<Record<string, unknown>>;
+    };
+    expect(manifest).toMatchObject({
+      schemaVersion: 1,
+      project: { id: project.id, name: 'Retrofit Decisions' },
+      exportedAt: '2026-07-17T08:02:00.000Z',
+      stages: [
+        {
+          stageId: 'design_brief',
+          stage: 'Design Brief',
+          file: 'design-brief.md',
+          model: 'gpt-5.4-mini',
+          prompt: 'Explain the product opportunity.',
+          requestId: 'req_export_brief',
+          responseId: 'resp_export_brief',
+          usage: { inputTokens: 11, outputTokens: 12, totalTokens: 23 },
+        },
+        {
+          stageId: 'concept_screens',
+          stage: 'Concept Screen Set',
+          files: [
+            'concept-screen-1.png',
+            'concept-screen-2.png',
+            'concept-screen-3.png',
+          ],
+          model: 'gpt-image-2',
+          prompt: 'Show the primary journey.',
+          imageQuality: 'high',
+          operations: [
+            { ordinal: 1, requestId: 'req_export_screen_1' },
+            { ordinal: 2, requestId: 'req_export_screen_2' },
+            { ordinal: 3, requestId: 'req_export_screen_3' },
+          ],
+        },
+        {
+          stageId: 'prd',
+          stage: 'PRD',
+          file: 'prd.md',
+          model: 'gpt-5.4-mini',
+          prompt: 'Turn the approved direction into requirements.',
+          requestId: 'req_export_prd',
+          responseId: 'resp_export_prd',
+          usage: { inputTokens: 31, outputTokens: 32, totalTokens: 63 },
+        },
+      ],
+    });
+    expect(strFromU8(files['manifest.json'])).not.toContain(project.insightSource);
+    expect(strFromU8(files['manifest.json'])).not.toContain('apiKey');
+    expect(strFromU8(files['manifest.json'])).not.toContain('insightforge.sqlite');
   });
 });

@@ -130,6 +130,24 @@ export function registerWorkflowRoutes(
     },
   );
 
+  app.get<{ Params: ProjectParameters }>(
+    '/api/projects/:id/deliverables',
+    async (request, reply) => {
+      try {
+        const exported = workflows.exportDeliverables(request.params.id);
+        return reply
+          .type('application/zip')
+          .header(
+            'content-disposition',
+            `attachment; filename="${exported.fileName}"`,
+          )
+          .send(exported.bytes);
+      } catch (error) {
+        return handleWorkflowError(error, reply);
+      }
+    },
+  );
+
   app.get<{ Params: ProjectParameters & { assetId: string } }>(
     '/api/projects/:id/concept-screen-assets/:assetId',
     async (request, reply) => {
