@@ -1203,10 +1203,13 @@ export async function openWorkflowService(
           design_brief_artifact_id = excluded.design_brief_artifact_id,
           created_at = excluded.created_at
       `).run(projectId, artifactId, completedAt.toISOString());
-      if (candidate && activeFullRuns.get(projectId)?.cancelRequested) {
-        throw new WorkflowCancellationError();
+      if (candidate) {
+        if (activeFullRuns.get(projectId)?.cancelRequested) {
+          throw new WorkflowCancellationError();
+        }
+        return readProjectWorkflow(projectId);
       }
-      return readProjectWorkflow(projectId);
+      return service.generateConceptScreens(projectId);
     },
 
     getConceptScreenAsset(projectId, assetId) {
