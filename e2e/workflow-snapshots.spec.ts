@@ -29,6 +29,7 @@ test('Author inspects, restores, and deletes Workflow Snapshots from compact his
 
   await page.goto(`/?project=${projectId}`);
   const historyTrigger = page.getByRole('button', { name: 'Workflow history, 1 snapshot' });
+  await expect(historyTrigger.locator('[aria-hidden="true"]')).toHaveText('◷');
   await historyTrigger.focus();
   await page.keyboard.press('Enter');
   let history = page.getByRole('complementary', { name: 'Workflow history' });

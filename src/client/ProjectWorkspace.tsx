@@ -584,7 +584,7 @@ export function ProjectWorkspace({
           }`}
           onClick={() => setHistoryOpen(true)}
         >
-          <span aria-hidden="true">â—·</span>
+          <span aria-hidden="true">◷</span>
           <span><strong>Workflow history</strong><small>{workflow.workflow?.snapshots.length ?? 0} preserved</small></span>
         </button>
         <div className={styles['local-note']}>
