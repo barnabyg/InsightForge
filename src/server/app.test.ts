@@ -37,7 +37,7 @@ describe('local application bootstrap', () => {
     });
 
     expect(bootstrap.statusCode).toBe(200);
-    expect(bootstrap.json()).toEqual({
+    expect(bootstrap.json()).toMatchObject({
       app: { name: 'InsightForge', version: '0.1.0' },
       mode: 'mock',
       connectivity: {
@@ -45,7 +45,12 @@ describe('local application bootstrap', () => {
         checkedAt: '2026-07-16T09:30:00.000Z',
         message: 'Mock OpenAI is ready',
       },
-      storage: { state: 'ready' },
+      storage: {
+        state: 'ready',
+        dataDirectory,
+        assetBytes: 0,
+        projects: [],
+      },
     });
     expect(JSON.stringify(bootstrap.json())).not.toContain('apiKey');
 
@@ -91,6 +96,37 @@ describe('local application bootstrap', () => {
       message: 'Set OPENAI_API_KEY to enable generation',
     });
     expect(response.headers['set-cookie']).toBeUndefined();
+
+    await app.close();
+  });
+
+  it('reports live local storage consumption and its application-data location', async () => {
+    const dataDirectory = await createTemporaryDataDirectory();
+    const app = await buildApp({ dataDirectory, mode: 'mock' });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/storage',
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      state: 'ready',
+      dataDirectory,
+      assetBytes: 0,
+      projects: [],
+    });
+    expect(response.json().databaseBytes).toBeGreaterThan(0);
+    expect(response.json().totalBytes).toBe(response.json().databaseBytes);
+    expect(response.json().availableBytes).toBeGreaterThan(0);
+
+    const bootstrap = await app.inject({
+      method: 'GET',
+      url: '/api/bootstrap',
+      headers: { host: 'localhost:4317' },
+    });
+    expect(bootstrap.json().storage).toEqual(response.json());
 
     await app.close();
   });

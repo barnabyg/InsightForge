@@ -1,10 +1,12 @@
 import { useState } from 'react';
 import type { ProjectSummary } from '../shared/projects.js';
+import type { StorageUsage } from '../shared/storage.js';
 import { Modal } from './Modal.js';
 import styles from './App.module.css';
 
 interface ProjectLibraryProps {
   projects: ProjectSummary[];
+  storage: StorageUsage | null;
   loading: boolean;
   onCreate(): Promise<unknown>;
   onImport(file: File): Promise<unknown>;
@@ -28,8 +30,16 @@ function formatActivity(updatedAt: string): string {
   }).format(new Date(updatedAt));
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+}
+
 export function ProjectLibrary({
   projects,
+  storage,
   loading,
   onCreate,
   onImport,
@@ -102,6 +112,19 @@ export function ProjectLibrary({
         </div>
       </aside>
 
+      {storage && (
+        <aside className={styles['storage-usage']} aria-label="Local storage usage">
+          <div>
+            <span>Local storage</span>
+            <strong>{formatBytes(storage.totalBytes)}</strong>
+          </div>
+          <div className={styles['storage-location']}>
+            <span>Application data</span>
+            <code title={storage.dataDirectory}>{storage.dataDirectory}</code>
+          </div>
+        </aside>
+      )}
+
       <section className={styles['project-library']} aria-labelledby="library-title">
         <div className={styles['section-heading']}>
           <div>
@@ -156,7 +179,15 @@ export function ProjectLibrary({
                   <span>Open Project <span aria-hidden="true">→</span></span>
                 </button>
                 <footer className={styles['project-card-footer']}>
-                  <time dateTime={project.updatedAt}>Updated {formatActivity(project.updatedAt)}</time>
+                  <div className={styles['project-card-meta']}>
+                    <time dateTime={project.updatedAt}>Updated {formatActivity(project.updatedAt)}</time>
+                    {storage && (
+                      <span>
+                        ≈{formatBytes(storage.projects.find(({ projectId }) =>
+                          projectId === project.id)?.estimatedBytes ?? 0)} local data
+                      </span>
+                    )}
+                  </div>
                   <div className={styles['project-actions']}>
                     <a
                       aria-label="Export Project"

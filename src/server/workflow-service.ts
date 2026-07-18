@@ -614,42 +614,10 @@ export async function openWorkflowService(
   dataDirectory: string,
   options: WorkflowServiceOptions,
 ): Promise<WorkflowService> {
-  await initializeStorage(dataDirectory);
+  await initializeStorage(dataDirectory, { now: options.now });
   const database = new DatabaseSync(join(dataDirectory, 'insightforge.sqlite'));
   database.exec('PRAGMA foreign_keys = ON;');
   const now = options.now ?? (() => new Date());
-  const hasInterruptedCandidate = Boolean(database.prepare(`
-    SELECT 1 FROM workflow_candidates WHERE status = 'running' LIMIT 1
-  `).get());
-  if (hasInterruptedCandidate) {
-    const recoveredAt = now().toISOString();
-    database.prepare(`
-    UPDATE concept_screen_operations
-    SET status = 'failed', completed_at = ?, error_code = 'generation_interrupted',
-        error_message = 'Generation was interrupted before this operation completed.'
-    WHERE status = 'running'
-      AND run_id IN (
-        SELECT concept_screen_run_id FROM workflow_candidates WHERE status = 'running'
-      )
-    `).run(recoveredAt);
-    database.prepare(`
-    UPDATE stage_runs
-    SET status = 'failed', completed_at = ?, error_code = 'generation_interrupted',
-        error_message = 'Generation was interrupted before this Stage Run completed.'
-    WHERE status = 'running' AND id IN (
-      SELECT design_brief_run_id FROM workflow_candidates WHERE status = 'running'
-      UNION SELECT concept_screen_run_id FROM workflow_candidates WHERE status = 'running'
-      UNION SELECT prd_run_id FROM workflow_candidates WHERE status = 'running'
-    )
-    `).run(recoveredAt);
-    database.prepare(`
-    UPDATE workflow_candidates
-    SET status = 'failed', error_code = 'generation_interrupted',
-        error_message = 'Full Generation was interrupted and can be resumed.',
-        updated_at = ?
-    WHERE status = 'running'
-    `).run(recoveredAt);
-  }
   const imageGeneration = options.imageGeneration ?? {
     async generateConceptScreen() {
       throw new GenerationBoundaryError(

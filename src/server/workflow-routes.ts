@@ -13,6 +13,7 @@ import {
   WorkflowValidationError,
   type WorkflowService,
 } from './workflow-service.js';
+import { StorageCapacityError, StorageInitializationError } from './storage.js';
 
 interface ProjectParameters {
   id: string;
@@ -36,6 +37,12 @@ interface ProjectImportUpload {
 }
 
 function handleWorkflowError(error: unknown, reply: FastifyReply) {
+  if (error instanceof StorageCapacityError) {
+    return reply.status(507).send({ code: error.code, error: error.message });
+  }
+  if (error instanceof StorageInitializationError) {
+    return reply.status(507).send({ code: error.code, error: error.message });
+  }
   if (error instanceof ProjectImportError) {
     return reply.status(400).send({ code: error.code, error: error.message });
   }

@@ -16,7 +16,12 @@ import { createOpenAITextGeneration } from './openai-text-generation.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 import { openProjectService } from './project-service.js';
 import { registerProjectRoutes } from './project-routes.js';
-import { defaultDataDirectory } from './storage.js';
+import {
+  defaultDataDirectory,
+  ensureStorageCapacity,
+  initializeStorage,
+  readStorageUsage,
+} from './storage.js';
 import { registerWebShell } from './web-shell.js';
 import { openWorkflowConfigurationService } from './workflow-configuration-service.js';
 import { registerWorkflowConfigurationRoutes } from './workflow-configuration-routes.js';
@@ -37,6 +42,7 @@ export interface BuildAppOptions {
   discoverModels?: () => Promise<CompatibleModels>;
   textGeneration?: TextGenerationBoundary;
   imageGeneration?: ImageGenerationBoundary;
+  checkStorage?: () => Promise<void>;
   webRoot?: string;
   logger?: boolean;
 }
@@ -61,6 +67,7 @@ export async function buildApp(
   const now = options.now ?? (() => new Date());
   const apiKey = options.apiKey ?? process.env.OPENAI_API_KEY;
   const dataDirectory = options.dataDirectory ?? defaultDataDirectory();
+  await initializeStorage(dataDirectory, { now });
   const projectService = await openProjectService(
     dataDirectory,
     { now },
@@ -112,7 +119,6 @@ export async function buildApp(
               },
             }),
   });
-  const storage = { state: 'ready' as const };
   const connectivity = createConnectivityMonitor(
     { mode, apiKey, now },
     options.checkOpenAI,
@@ -129,7 +135,11 @@ export async function buildApp(
   });
 
   registerLocalAccess(app);
-  registerBootstrapRoutes(app, { mode, storage, connectivity });
+  registerBootstrapRoutes(app, {
+    mode,
+    connectivity,
+    readStorage: () => readStorageUsage(dataDirectory),
+  });
   registerProjectRoutes(app, projectService);
   registerWorkflowConfigurationRoutes(
     app,
@@ -138,6 +148,7 @@ export async function buildApp(
   );
   registerWorkflowRoutes(app, workflowService, {
     beforeGeneration: async () => {
+      await (options.checkStorage ?? (() => ensureStorageCapacity(dataDirectory)))();
       const state = await connectivity.refresh();
       if (state.state !== 'connected') {
         throw new WorkflowGenerationError(

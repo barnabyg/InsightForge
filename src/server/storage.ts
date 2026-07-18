@@ -1,12 +1,120 @@
-import { mkdir, readdir, rm } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { mkdir, open, readdir, rm, stat, statfs, unlink } from 'node:fs/promises';
 import { homedir, platform } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve, sep } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
+import type { StorageUsage } from '../shared/storage.js';
 import { defaultStageConfigurations } from './workflow-defaults.js';
+
+export interface StorageRecovery {
+  abandonedOperations: number;
+  abandonedStageRuns: number;
+  abandonedCandidates: number;
+  orphanAssetsRemoved: number;
+}
 
 export interface StorageState {
   state: 'ready';
+  recovery: StorageRecovery;
 }
+
+export interface InitializeStorageOptions {
+  now?: () => Date;
+}
+
+export class StorageInitializationError extends Error {
+  readonly code = 'storage_unusable';
+
+  constructor(dataDirectory: string, cause?: unknown) {
+    super(
+      `Local application data at ${dataDirectory} could not be opened safely.`,
+      { cause },
+    );
+    this.name = 'StorageInitializationError';
+  }
+}
+
+function formatCapacity(bytes: number): string {
+  const units = [
+    { bytes: 1024 ** 3, label: 'GiB' },
+    { bytes: 1024 ** 2, label: 'MiB' },
+    { bytes: 1024, label: 'KiB' },
+  ];
+  const unit = units.find((candidate) => bytes >= candidate.bytes);
+  return unit ? `${Math.floor(bytes / unit.bytes)} ${unit.label}` : `${bytes} bytes`;
+}
+
+export class StorageCapacityError extends Error {
+  readonly code = 'insufficient_storage';
+
+  constructor(
+    readonly availableBytes: number,
+    readonly requiredBytes: number,
+  ) {
+    super(
+      `Generation needs at least ${formatCapacity(requiredBytes)} of free local storage; `
+      + `${formatCapacity(availableBytes)} is available.`,
+    );
+    this.name = 'StorageCapacityError';
+  }
+}
+
+interface AssetRow {
+  relative_path: string;
+  byte_size: number;
+}
+
+interface ProjectUsageRow {
+  project_id: string;
+  name: string;
+  structured_bytes: number;
+  asset_bytes: number;
+}
+
+const currentSchemaVersion = 7;
+
+async function listFiles(directory: string): Promise<string[]> {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files: string[] = [];
+  for (const entry of entries) {
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) files.push(...await listFiles(path));
+    else if (entry.isFile()) files.push(path);
+  }
+  return files;
+}
+
+function storedAssetPath(dataDirectory: string, relativePath: string): string {
+  const assetsRoot = resolve(dataDirectory, 'assets');
+  const path = resolve(dataDirectory, relativePath);
+  if (!path.startsWith(`${assetsRoot}${sep}`)) {
+    throw new StorageInitializationError(dataDirectory);
+  }
+  return path;
+}
+
+async function verifyWritable(dataDirectory: string): Promise<void> {
+  const probePath = join(dataDirectory, 'assets', `.write-probe-${randomUUID()}`);
+  let probe: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    probe = await open(probePath, 'wx');
+    await probe.writeFile('InsightForge storage probe');
+    await probe.sync();
+  } finally {
+    await probe?.close().catch(() => undefined);
+    await unlink(probePath).catch(() => undefined);
+  }
+}
+
+async function fileSize(path: string): Promise<number> {
+  try {
+    return (await stat(path)).size;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return 0;
+    throw error;
+  }
+}
+
 export function defaultDataDirectory(environment = process.env): string {
   if (environment.INSIGHTFORGE_DATA_DIR) {
     return environment.INSIGHTFORGE_DATA_DIR;
@@ -31,22 +139,53 @@ export function defaultDataDirectory(environment = process.env): string {
 
 export async function initializeStorage(
   dataDirectory: string,
+  options: InitializeStorageOptions = {},
 ): Promise<StorageState> {
-  await mkdir(join(dataDirectory, 'assets'), { recursive: true });
-
-  const database = new DatabaseSync(join(dataDirectory, 'insightforge.sqlite'));
   try {
+    await mkdir(join(dataDirectory, 'assets'), { recursive: true });
+    await verifyWritable(dataDirectory);
+  } catch (error) {
+    throw new StorageInitializationError(dataDirectory, error);
+  }
+
+  let database: DatabaseSync;
+  try {
+    database = new DatabaseSync(join(dataDirectory, 'insightforge.sqlite'));
+  } catch (error) {
+    throw new StorageInitializationError(dataDirectory, error);
+  }
+  const recovery: StorageRecovery = {
+    abandonedOperations: 0,
+    abandonedStageRuns: 0,
+    abandonedCandidates: 0,
+    orphanAssetsRemoved: 0,
+  };
+  try {
+    database.exec('PRAGMA foreign_keys = ON;');
+    const startupCheck = database.prepare('PRAGMA quick_check;')
+      .all() as unknown as Array<{ quick_check: string }>;
+    if (startupCheck.length !== 1 || startupCheck[0]?.quick_check !== 'ok') {
+      throw new StorageInitializationError(dataDirectory);
+    }
     database.exec(`
-      PRAGMA journal_mode = WAL;
-      PRAGMA foreign_keys = ON;
       CREATE TABLE IF NOT EXISTS app_metadata (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
       );
-      INSERT INTO app_metadata (key, value)
-      VALUES ('schema_version', '7')
-      ON CONFLICT(key) DO UPDATE SET value = excluded.value;
+    `);
+    const storedSchema = database.prepare(`
+      SELECT value FROM app_metadata WHERE key = 'schema_version'
+    `).get() as unknown as { value: string } | undefined;
+    if (storedSchema) {
+      const version = Number(storedSchema.value);
+      if (!Number.isInteger(version) || version < 1 || version > currentSchemaVersion) {
+        throw new StorageInitializationError(dataDirectory);
+      }
+    }
 
+    database.exec(`
+      PRAGMA journal_mode = WAL;
+      PRAGMA foreign_keys = ON;
       CREATE TABLE IF NOT EXISTS projects (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
@@ -345,6 +484,51 @@ export async function initializeStorage(
       );
     }
 
+    database.prepare(`
+      INSERT INTO app_metadata (key, value)
+      VALUES ('schema_version', ?)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value
+    `).run(String(currentSchemaVersion));
+
+    const quickCheck = database.prepare('PRAGMA quick_check;')
+      .all() as unknown as Array<{ quick_check: string }>;
+    if (quickCheck.length !== 1 || quickCheck[0]?.quick_check !== 'ok') {
+      throw new StorageInitializationError(dataDirectory);
+    }
+    const foreignKeyFailures = database.prepare('PRAGMA foreign_key_check;').all();
+    if (foreignKeyFailures.length > 0) {
+      throw new StorageInitializationError(dataDirectory);
+    }
+
+    const hasAbandonedWork = Boolean(database.prepare(`
+      SELECT 1 FROM concept_screen_operations WHERE status = 'running'
+      UNION ALL SELECT 1 FROM stage_runs WHERE status = 'running'
+      UNION ALL SELECT 1 FROM workflow_candidates WHERE status = 'running'
+      LIMIT 1
+    `).get());
+    if (hasAbandonedWork) {
+      const recoveredAt = (options.now ?? (() => new Date()))().toISOString();
+      recovery.abandonedOperations = Number(database.prepare(`
+        UPDATE concept_screen_operations
+        SET status = 'failed', completed_at = ?, error_code = 'generation_interrupted',
+            error_message = 'Generation was interrupted before this operation completed.'
+        WHERE status = 'running'
+      `).run(recoveredAt).changes);
+      recovery.abandonedStageRuns = Number(database.prepare(`
+        UPDATE stage_runs
+        SET status = 'failed', completed_at = ?, error_code = 'generation_interrupted',
+            error_message = 'Generation was interrupted before this Stage Run completed.'
+        WHERE status = 'running'
+      `).run(recoveredAt).changes);
+      recovery.abandonedCandidates = Number(database.prepare(`
+        UPDATE workflow_candidates
+        SET status = 'failed', error_code = 'generation_interrupted',
+            error_message = 'Full Generation was interrupted and can be resumed.',
+            updated_at = ?
+        WHERE status = 'running'
+      `).run(recoveredAt).changes);
+    }
+
     const assetEntries = await readdir(join(dataDirectory, 'assets'), {
       withFileTypes: true,
     });
@@ -365,9 +549,235 @@ export async function initializeStorage(
         });
       }
     }
+
+    const assetRows = database.prepare(`
+      SELECT relative_path, byte_size FROM binary_assets
+    `).all() as unknown as AssetRow[];
+    const referencedAssets = new Set<string>();
+    for (const asset of assetRows) {
+      const path = storedAssetPath(dataDirectory, asset.relative_path);
+      referencedAssets.add(path);
+      const assetStat = await stat(path).catch(() => null);
+      if (!assetStat?.isFile() || assetStat.size !== asset.byte_size) {
+        throw new StorageInitializationError(dataDirectory);
+      }
+    }
+    for (const path of await listFiles(join(dataDirectory, 'assets'))) {
+      if (referencedAssets.has(resolve(path))) continue;
+      await unlink(path);
+      recovery.orphanAssetsRemoved += 1;
+    }
+  } catch (error) {
+    if (error instanceof StorageInitializationError) throw error;
+    throw new StorageInitializationError(dataDirectory, error);
   } finally {
     database.close();
   }
 
-  return { state: 'ready' };
+  return { state: 'ready', recovery };
+}
+
+export async function readStorageUsage(
+  dataDirectory: string,
+): Promise<StorageUsage> {
+  let database: DatabaseSync;
+  try {
+    database = new DatabaseSync(join(dataDirectory, 'insightforge.sqlite'), {
+      readOnly: true,
+    });
+  } catch (error) {
+    throw new StorageInitializationError(dataDirectory, error);
+  }
+  try {
+    const projects = database.prepare(`
+      WITH structured_payloads (project_id, payload_bytes) AS (
+        SELECT id,
+               length(CAST(id AS BLOB))
+               + length(CAST(name AS BLOB))
+               + length(CAST(insight_source AS BLOB))
+               + length(CAST(created_at AS BLOB))
+               + length(CAST(updated_at AS BLOB))
+               + length(CAST(name_is_automatic AS BLOB))
+        FROM projects
+        UNION ALL
+        SELECT project_id,
+               length(CAST(id AS BLOB))
+               + length(CAST(stage_id AS BLOB))
+               + length(CAST(run_kind AS BLOB))
+               + length(CAST(status AS BLOB))
+               + length(CAST(started_at AS BLOB))
+               + length(CAST(COALESCE(completed_at, '') AS BLOB))
+               + length(CAST(COALESCE(duration_ms, '') AS BLOB))
+               + length(CAST(prompt_snapshot AS BLOB))
+               + length(CAST(model_snapshot AS BLOB))
+               + length(CAST(stage_configuration_updated_at AS BLOB))
+               + length(CAST(input_snapshot AS BLOB))
+               + length(CAST(COALESCE(input_artifact_id, '') AS BLOB))
+               + length(CAST(COALESCE(input_run_id, '') AS BLOB))
+               + length(CAST(COALESCE(input_lineage_json, '') AS BLOB))
+               + length(CAST(assembled_request AS BLOB))
+               + length(CAST(COALESCE(settings_json, '') AS BLOB))
+               + length(CAST(COALESCE(attempt_history_json, '') AS BLOB))
+               + length(CAST(COALESCE(response_id, '') AS BLOB))
+               + length(CAST(COALESCE(request_id, '') AS BLOB))
+               + length(CAST(COALESCE(usage_json, '') AS BLOB))
+               + length(CAST(COALESCE(validation_json, '') AS BLOB))
+               + length(CAST(COALESCE(error_code, '') AS BLOB))
+               + length(CAST(COALESCE(error_message, '') AS BLOB))
+        FROM stage_runs
+        UNION ALL
+        SELECT project_id,
+               length(CAST(id AS BLOB))
+               + length(CAST(stage_id AS BLOB))
+               + length(CAST(run_id AS BLOB))
+               + length(CAST(markdown AS BLOB))
+               + length(CAST(created_at AS BLOB))
+               + length(CAST(validation_json AS BLOB))
+        FROM artifacts
+        UNION ALL
+        SELECT project_id,
+               length(CAST(project_id AS BLOB))
+               + length(CAST(stage_id AS BLOB))
+               + length(CAST(artifact_id AS BLOB))
+        FROM current_artifacts
+        UNION ALL
+        SELECT project_id,
+               length(CAST(id AS BLOB))
+               + length(CAST(insight_source AS BLOB))
+               + length(CAST(created_at AS BLOB))
+               + length(CAST(updated_at AS BLOB))
+        FROM insight_revisions
+        UNION ALL
+        SELECT project_id,
+               length(CAST(id AS BLOB))
+               + length(CAST(run_kind AS BLOB))
+               + length(CAST(status AS BLOB))
+               + length(CAST(current_stage AS BLOB))
+               + length(CAST(completed_operation_count AS BLOB))
+               + length(CAST(start_stage AS BLOB))
+               + length(CAST(insight_source AS BLOB))
+               + length(CAST(COALESCE(insight_revision_id, '') AS BLOB))
+               + length(CAST(configuration_json AS BLOB))
+               + length(CAST(COALESCE(design_brief_run_id, '') AS BLOB))
+               + length(CAST(COALESCE(design_brief_artifact_id, '') AS BLOB))
+               + length(CAST(COALESCE(concept_screen_run_id, '') AS BLOB))
+               + length(CAST(COALESCE(concept_screen_artifact_id, '') AS BLOB))
+               + length(CAST(COALESCE(prd_run_id, '') AS BLOB))
+               + length(CAST(COALESCE(prd_artifact_id, '') AS BLOB))
+               + length(CAST(COALESCE(warnings_json, '') AS BLOB))
+               + length(CAST(COALESCE(error_code, '') AS BLOB))
+               + length(CAST(COALESCE(error_message, '') AS BLOB))
+               + length(CAST(started_at AS BLOB))
+               + length(CAST(updated_at AS BLOB))
+        FROM workflow_candidates
+        UNION ALL
+        SELECT project_id,
+               length(CAST(id AS BLOB))
+               + length(CAST(created_at AS BLOB))
+               + length(CAST(preserved_by AS BLOB))
+               + length(CAST(replaced_from_stage AS BLOB))
+               + length(CAST(insight_source AS BLOB))
+               + length(CAST(COALESCE(design_brief_artifact_id, '') AS BLOB))
+               + length(CAST(COALESCE(concept_screen_artifact_id, '') AS BLOB))
+               + length(CAST(COALESCE(prd_artifact_id, '') AS BLOB))
+        FROM workflow_snapshots
+        UNION ALL
+        SELECT project_id,
+               length(CAST(project_id AS BLOB))
+               + length(CAST(design_brief_artifact_id AS BLOB))
+               + length(CAST(created_at AS BLOB))
+        FROM pending_cascades
+        UNION ALL
+        SELECT project_id,
+               length(CAST(id AS BLOB))
+               + length(CAST(run_id AS BLOB))
+               + length(CAST(relative_path AS BLOB))
+               + length(CAST(media_type AS BLOB))
+               + length(CAST(byte_size AS BLOB))
+               + length(CAST(width AS BLOB))
+               + length(CAST(height AS BLOB))
+               + length(CAST(created_at AS BLOB))
+        FROM binary_assets
+        UNION ALL
+        SELECT run.project_id,
+               length(CAST(operation.run_id AS BLOB))
+               + length(CAST(operation.ordinal AS BLOB))
+               + length(CAST(operation.status AS BLOB))
+               + length(CAST(operation.started_at AS BLOB))
+               + length(CAST(COALESCE(operation.completed_at, '') AS BLOB))
+               + length(CAST(COALESCE(operation.duration_ms, '') AS BLOB))
+               + length(CAST(COALESCE(operation.asset_id, '') AS BLOB))
+               + length(CAST(COALESCE(operation.response_id, '') AS BLOB))
+               + length(CAST(COALESCE(operation.request_id, '') AS BLOB))
+               + length(CAST(COALESCE(operation.usage_json, '') AS BLOB))
+               + length(CAST(COALESCE(operation.error_code, '') AS BLOB))
+               + length(CAST(COALESCE(operation.error_message, '') AS BLOB))
+        FROM concept_screen_operations AS operation
+        JOIN stage_runs AS run ON run.id = operation.run_id
+      )
+      SELECT project.id AS project_id, project.name,
+             COALESCE((
+               SELECT SUM(payload.payload_bytes)
+               FROM structured_payloads AS payload
+               WHERE payload.project_id = project.id
+             ), 0) AS structured_bytes,
+             COALESCE((
+               SELECT SUM(asset.byte_size)
+               FROM binary_assets AS asset
+               WHERE asset.project_id = project.id
+             ), 0) AS asset_bytes
+      FROM projects AS project
+      ORDER BY project.updated_at DESC, project.created_at DESC, project.id ASC
+    `).all() as unknown as ProjectUsageRow[];
+    const assetBytes = projects.reduce((total, project) =>
+      total + Number(project.asset_bytes), 0);
+    const databaseBytes = await Promise.all([
+      'insightforge.sqlite',
+      'insightforge.sqlite-wal',
+      'insightforge.sqlite-shm',
+    ].map((name) => fileSize(join(dataDirectory, name))))
+      .then((sizes) => sizes.reduce((total, size) => total + size, 0));
+    const filesystem = await statfs(dataDirectory);
+    const availableBytes = Math.min(
+      Number.MAX_SAFE_INTEGER,
+      Number(filesystem.bavail) * Number(filesystem.bsize),
+    );
+    return {
+      state: 'ready',
+      dataDirectory,
+      totalBytes: databaseBytes + assetBytes,
+      databaseBytes,
+      assetBytes,
+      availableBytes,
+      projects: projects.map((project) => ({
+        projectId: project.project_id,
+        name: project.name,
+        estimatedBytes: Number(project.structured_bytes) + Number(project.asset_bytes),
+        structuredBytes: Number(project.structured_bytes),
+        assetBytes: Number(project.asset_bytes),
+      })),
+    };
+  } catch (error) {
+    if (error instanceof StorageInitializationError) throw error;
+    throw new StorageInitializationError(dataDirectory, error);
+  } finally {
+    database.close();
+  }
+}
+
+export async function ensureStorageCapacity(
+  dataDirectory: string,
+  requiredBytes = 64 * 1024 * 1024,
+): Promise<void> {
+  try {
+    await verifyWritable(dataDirectory);
+    const usage = await readStorageUsage(dataDirectory);
+    if (usage.availableBytes < requiredBytes) {
+      throw new StorageCapacityError(usage.availableBytes, requiredBytes);
+    }
+  } catch (error) {
+    if (error instanceof StorageCapacityError) throw error;
+    if (error instanceof StorageInitializationError) throw error;
+    throw new StorageInitializationError(dataDirectory, error);
+  }
 }

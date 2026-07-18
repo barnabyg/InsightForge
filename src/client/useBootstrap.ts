@@ -5,17 +5,20 @@ import type {
   ConnectivityState,
   ConnectivityStatus,
 } from '../shared/bootstrap.js';
+import type { StorageUsage } from '../shared/storage.js';
 
 export interface ShellState {
   mode: ApplicationMode | null;
   connectivity: ConnectivityStatus;
   message: string;
   checkedAt: string | null;
+  storage: StorageUsage | null;
 }
 
 export interface BootstrapController {
   shell: ShellState;
   refreshConnectivity(): Promise<void>;
+  refreshStorage(): Promise<void>;
   refreshing: boolean;
 }
 const initialState: ShellState = {
@@ -23,17 +26,20 @@ const initialState: ShellState = {
   connectivity: 'checking',
   message: 'Checking OpenAI connectivity',
   checkedAt: null,
+  storage: null,
 };
 
 function shellState(
   mode: ApplicationMode,
   connectivity: ConnectivityState,
+  storage: StorageUsage | null,
 ): ShellState {
   return {
     mode,
     connectivity: connectivity.state,
     message: connectivity.message,
     checkedAt: connectivity.checkedAt,
+    storage,
   };
 }
 
@@ -51,7 +57,7 @@ export function useBootstrap(): BootstrapController {
           throw new Error(`Bootstrap failed with status ${response.status}`);
         }
         const result = await response.json() as BootstrapResponse;
-        setState(shellState(result.mode, result.connectivity));
+        setState(shellState(result.mode, result.connectivity, result.storage));
 
         if (result.connectivity.state === 'checking') {
           const connectivityResponse = await fetch('/api/connectivity', {
@@ -63,7 +69,7 @@ export function useBootstrap(): BootstrapController {
             );
           }
           const connectivity = await connectivityResponse.json() as ConnectivityState;
-          setState(shellState(result.mode, connectivity));
+          setState(shellState(result.mode, connectivity, result.storage));
         }
       } catch (error) {
         if (error instanceof DOMException && error.name === 'AbortError') {
@@ -74,6 +80,7 @@ export function useBootstrap(): BootstrapController {
           connectivity: 'unavailable',
           message: 'The local InsightForge server could not be reached',
           checkedAt: null,
+          storage: null,
         });
       }
     }
@@ -97,7 +104,11 @@ export function useBootstrap(): BootstrapController {
         throw new Error(`Connectivity refresh failed with status ${response.status}`);
       }
       const connectivity = await response.json() as ConnectivityState;
-      setState((current) => shellState(current.mode ?? 'live', connectivity));
+      setState((current) => shellState(
+        current.mode ?? 'live',
+        connectivity,
+        current.storage,
+      ));
     } catch {
       setState((current) => ({
         ...current,
@@ -110,5 +121,16 @@ export function useBootstrap(): BootstrapController {
     }
   }, []);
 
-  return { shell: state, refreshConnectivity, refreshing };
+  const refreshStorage = useCallback(async () => {
+    try {
+      const response = await fetch('/api/storage');
+      if (!response.ok) return;
+      const storage = await response.json() as StorageUsage;
+      setState((current) => ({ ...current, storage }));
+    } catch {
+      // Existing storage information remains useful during a transient local failure.
+    }
+  }, []);
+
+  return { shell: state, refreshConnectivity, refreshStorage, refreshing };
 }

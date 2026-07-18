@@ -5,6 +5,9 @@ import { afterEach, describe, expect, it } from 'vitest';
 import type { FastifyInstance } from 'fastify';
 import { strFromU8, unzipSync } from 'fflate';
 import { buildApp } from './app.js';
+import { createMockImageGeneration } from './mock-image-generation.js';
+import { createMockTextGeneration } from './mock-text-generation.js';
+import { StorageCapacityError } from './storage.js';
 
 describe('Workflow HTTP API', () => {
   const temporaryDirectories: string[] = [];
@@ -141,6 +144,43 @@ describe('Workflow HTTP API', () => {
     }
   });
 
+  it('blocks generation before OpenAI when local persistence is unsafe', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'mock',
+      checkStorage: async () => {
+        throw new StorageCapacityError(1024, 64 * 1024 * 1024);
+      },
+    });
+    apps.push(app);
+    const created = await app.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: { insightSource: 'A safe generation must have durable local space.' },
+    });
+
+    const response = await app.inject({
+      method: 'POST',
+      url: `/api/projects/${created.json().id}/design-brief-runs`,
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(response.statusCode).toBe(507);
+    expect(response.json()).toEqual({
+      code: 'insufficient_storage',
+      error: 'Generation needs at least 64 MiB of free local storage; 1 KiB is available.',
+    });
+    const workflow = await app.inject({
+      method: 'GET',
+      url: `/api/projects/${created.json().id}/workflow`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(workflow.json().lastDesignBriefRun).toBeNull();
+  });
+
   async function generateAndPromoteFullWorkflow(
     app: FastifyInstance,
     projectId: string,
@@ -163,6 +203,120 @@ describe('Workflow HTTP API', () => {
       headers: { host: 'localhost:4317' },
     });
   }
+
+  it('keeps local work and portability available while OpenAI is unavailable', async () => {
+    const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
+    temporaryDirectories.push(dataDirectory);
+    const seed = await buildApp({
+      dataDirectory,
+      mode: 'mock',
+      textGeneration: createMockTextGeneration(),
+      imageGeneration: createMockImageGeneration(),
+    });
+    const created = await seed.inject({
+      method: 'POST',
+      url: '/api/projects',
+      headers: { host: 'localhost:4317' },
+      payload: {
+        name: 'Offline Project',
+        insightSource: 'Local work must remain available through a network outage.',
+      },
+    });
+    const projectId = created.json().id as string;
+    await generateAndPromoteFullWorkflow(seed, projectId);
+    const rerun = await seed.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/workflow-reruns`,
+      headers: { host: 'localhost:4317' },
+      payload: { stageId: 'prd' },
+    });
+    expect(rerun.statusCode).toBe(201);
+    await seed.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/full-generations/promotion`,
+      headers: { host: 'localhost:4317' },
+    });
+    await seed.close();
+
+    const offline = await buildApp({
+      dataDirectory,
+      mode: 'live',
+      apiKey: 'test-key',
+      checkOpenAI: async () => ({
+        state: 'unavailable',
+        checkedAt: '2026-07-18T12:00:00.000Z',
+        message: 'OpenAI could not be reached',
+      }),
+      textGeneration: createMockTextGeneration(),
+      imageGeneration: createMockImageGeneration(),
+    });
+    apps.push(offline);
+    await offline.ready();
+
+    const workflow = await offline.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}/workflow`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(workflow.statusCode).toBe(200);
+    expect(workflow.json()).toMatchObject({
+      designBrief: { stageId: 'design_brief' },
+      conceptScreenSet: { stageId: 'concept_screens' },
+      prd: { stageId: 'prd' },
+      snapshots: [{ id: expect.any(String) }],
+    });
+    const snapshot = await offline.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}/workflow-snapshots/${workflow.json().snapshots[0].id}`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(snapshot.statusCode).toBe(200);
+
+    const configuration = await offline.inject({
+      method: 'PUT',
+      url: '/api/workflow-configuration/stages/design_brief/draft',
+      headers: { host: 'localhost:4317' },
+      payload: { prompt: 'An offline Prompt Draft' },
+    });
+    expect(configuration.statusCode).toBe(200);
+    expect(configuration.json().stages[0].draftPrompt.prompt)
+      .toBe('An offline Prompt Draft');
+
+    const exported = await offline.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}/export`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(exported.statusCode).toBe(200);
+    const imported = await offline.inject({
+      method: 'POST',
+      url: '/api/project-imports',
+      headers: {
+        host: 'localhost:4317',
+        'content-type': 'application/zip',
+      },
+      payload: exported.rawPayload,
+    });
+    expect(imported.statusCode).toBe(201);
+
+    const blocked = await offline.inject({
+      method: 'POST',
+      url: `/api/projects/${projectId}/workflow-reruns`,
+      headers: { host: 'localhost:4317' },
+      payload: { stageId: 'prd' },
+    });
+    expect(blocked.statusCode).toBe(503);
+    expect(blocked.json()).toEqual({
+      code: 'openai_unavailable',
+      error: 'OpenAI could not be reached',
+    });
+    const unchanged = await offline.inject({
+      method: 'GET',
+      url: `/api/projects/${projectId}/workflow`,
+      headers: { host: 'localhost:4317' },
+    });
+    expect(unchanged.json().prd.id).toBe(workflow.json().prd.id);
+  });
 
   it('generates and retrieves a PRD with its upstream lineage through the public workflow resource', async () => {
     const dataDirectory = await mkdtemp(join(tmpdir(), 'insightforge-workflow-api-'));
