@@ -258,6 +258,22 @@ export function ProjectWorkspace({
     url.searchParams.set('stage', stage);
     window.history.replaceState(null, '', url);
     setSelectedStage(stage);
+    requestAnimationFrame(() => {
+      document.querySelector<HTMLElement>('main h1')?.focus({ preventScroll: true });
+      window.scrollTo(0, 0);
+    });
+  }
+
+  function stageLink(stage: GeneratedStageId, label: string, primary = false) {
+    return <a
+      className={styles[primary ? 'primary-action' : 'secondary-action']}
+      href={`/?project=${encodeURIComponent(project.id)}&stage=${stage}`}
+      onClick={event => {
+        if (event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return;
+        event.preventDefault();
+        void selectStage(stage);
+      }}
+    >{label}</a>;
   }
 
   async function openRevisionEditor(): Promise<void> {
@@ -600,7 +616,7 @@ export function ProjectWorkspace({
       {selectedStage === 'insight_source' ? (
         <main className={styles['artifact-canvas']}>
           <header className={styles['project-heading']}>
-            <div><p className={styles.eyebrow}>Stage 01 · Insight Source</p><h1>{project.name}</h1></div>
+            <div><p className={styles.eyebrow}>Stage 01 · Insight Source</p><h1 tabIndex={-1}>{project.name}</h1></div>
             <span
               className={`${styles['save-state']} ${styles[`save-state--${saveState}`]}`}
               role="status"
@@ -676,8 +692,14 @@ export function ProjectWorkspace({
             <div className={styles['full-generation-heading']}>
               <div>
                 <p className={styles.eyebrow}>One-pass workflow</p>
-                <h2>Generate the complete workflow</h2>
-                <p>One Design Brief request, three sequential Concept Screens, and one PRD request. Current artifacts change only after the complete Candidate Workflow succeeds.</p>
+                <h2>{completeWorkflow ? 'Your workflow is ready to review' : 'Generate the complete workflow'}</h2>
+                {completeWorkflow ? (
+                  <nav className={styles['review-links']} aria-label="Review workflow">
+                    {stageLink('design_brief', 'Review design brief', true)}
+                    {stageLink('concept_screens', 'View concept screens')}
+                    {stageLink('prd', 'Open PRD')}
+                  </nav>
+                ) : <p>One Design Brief request, three sequential Concept Screens, and one PRD request. Current artifacts change only after the complete Candidate Workflow succeeds.</p>}
               </div>
               {!candidate
                 && !workflow.workflow?.insightRevision
@@ -780,8 +802,9 @@ export function ProjectWorkspace({
           <header className={styles['project-heading']}>
             <div>
               <p className={styles.eyebrow}>Stage 02 · {project.name}</p>
-              <h1>Design Brief</h1>
+              <h1 tabIndex={-1}>Design Brief</h1>
             </div>
+            {workflow.workflow?.designBrief && stageLink('concept_screens', 'Continue to Concept Screens', true)}
             {workflow.workflow?.designBrief && (
               <span className={styles['artifact-date']}>
                 Generated <time dateTime={workflow.workflow.designBrief.createdAt}>
@@ -856,8 +879,9 @@ export function ProjectWorkspace({
           <header className={styles['project-heading']}>
             <div>
               <p className={styles.eyebrow}>Stage 03 · {project.name}</p>
-              <h1>Concept Screens</h1>
+              <h1 tabIndex={-1}>Concept Screens</h1>
             </div>
+            {workflow.workflow?.conceptScreenSet && stageLink('prd', 'Continue to PRD', true)}
             {workflow.workflow?.conceptScreenSet && (
               <span className={styles['artifact-date']}>
                 Generated <time dateTime={workflow.workflow.conceptScreenSet.createdAt}>
@@ -949,7 +973,7 @@ export function ProjectWorkspace({
           <header className={styles['project-heading']}>
             <div>
               <p className={styles.eyebrow}>Stage 04 · {project.name}</p>
-              <h1>PRD</h1>
+              <h1 tabIndex={-1}>PRD</h1>
             </div>
             {workflow.workflow?.prd && (
               <span className={styles['artifact-date']}>

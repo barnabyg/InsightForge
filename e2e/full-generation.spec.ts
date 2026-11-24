@@ -53,7 +53,9 @@ test('Author generates the complete workflow atomically with one action', async 
   await expect(page.getByRole('button', { name: /Design Brief/ })).toContainText('Current');
   await expect(page.getByRole('button', { name: /Concept Screens/ })).toContainText('Current');
   await expect(page.getByRole('button', { name: /PRD/ })).toContainText('Current');
-  await page.getByRole('button', { name: /PRD/ }).click();
+  await page.getByRole('link', { name: 'Review design brief' }).click();
+  await page.getByRole('link', { name: 'Continue to Concept Screens' }).click();
+  await page.getByRole('link', { name: 'Continue to PRD' }).click();
   await expect(page.getByRole('article', { name: 'PRD Artifact' })).toContainText('FR-001');
 });
 

@@ -1133,6 +1133,17 @@ a {
   gap: 28px;
 }
 
+.review-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.review-links a, .project-heading > a {
+  text-decoration: none;
+}
+
 .full-generation-heading h2 {
   margin: 3px 0 6px;
   font-family: Georgia, 'Times New Roman', serif;
