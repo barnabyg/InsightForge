@@ -109,3 +109,14 @@ test('restored backups reopen with all artifacts and their preserved history', a
   await rail.getByRole('button', { name: /PRD/ }).click();
   await expect(page.getByRole('article', { name: 'PRD Artifact' })).toContainText('FR-001');
 });
+
+test('legacy backup still opens after its original snapshot was removed', async ({ page }) => {
+  await page.goto('/');
+  const imported = page.waitForResponse(response => response.url().endsWith('/api/project-imports'));
+  await page.getByLabel('Import Project file').setInputFiles('e2e/fixtures/restored-project-after-cleanup-v1.zip');
+  expect((await imported).status()).toBe(201);
+  await page.getByRole('article', { name: /Review backup integrity/ }).first()
+    .getByRole('button', { name: /Open Project/ }).click();
+  await page.getByRole('link', { name: 'Open PRD' }).click();
+  await expect(page.getByRole('article', { name: 'PRD Artifact' })).toContainText('FR-001');
+});

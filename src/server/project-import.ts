@@ -655,6 +655,32 @@ function requireReference(map: Map<string, unknown>, id: string | null, label: s
   if (id !== null && !map.has(id)) invalidStructure(`${label} references missing identifier ${id}.`);
 }
 
+// Older releases could delete an original artifact when its snapshot was removed,
+// leaving the current restored copy and its producer run intact.
+function recoverRestoredInputs(payload: ProjectExportEnvelope): void {
+  const artifacts = new Map(payload.artifacts.map(artifact => [artifact.id, artifact]));
+  const runs = new Map(payload.stageRuns.map(run => [run.id, run]));
+  function recover(id: unknown, runId: unknown, copyId: string | undefined) {
+    const copy = copyId && artifacts.get(copyId);
+    if (!copy || typeof id !== 'string' || !id || artifacts.has(id) || runId !== copy.runId) return;
+    const original = { ...copy, id };
+    artifacts.set(id, original);
+    payload.artifacts.push(original);
+  }
+  for (const workflow of [payload.currentWorkflow, ...payload.workflowSnapshots]) {
+    const ids = workflow.artifactIds;
+    const concept = ids.conceptScreens && artifacts.get(ids.conceptScreens);
+    const conceptRun = concept && runs.get(concept.runId);
+    if (conceptRun) recover(conceptRun.inputArtifactId, conceptRun.inputRunId, ids.designBrief);
+    const prd = ids.prd && artifacts.get(ids.prd);
+    const prdRun = prd && runs.get(prd.runId);
+    if (!prdRun || !isRecord(prdRun.inputLineage)) continue;
+    recover(prdRun.inputArtifactId, prdRun.inputRunId, ids.designBrief);
+    const screens = prdRun.inputLineage.conceptScreenSet;
+    if (isRecord(screens)) recover(screens.artifactId, screens.runId, ids.conceptScreens);
+  }
+}
+
 function validateReferences(payload: ProjectExportEnvelope, files: ArchiveFiles): void {
   const allIds = new Set([payload.project.id]);
   const uniqueId = (id: string, label: string) => {
@@ -1042,6 +1068,7 @@ function importExtractedProject(
 ): Project {
   const manifest = validateManifest(files);
   const payload = parseProjectExport(files, manifest);
+  recoverRestoredInputs(payload);
   validateReferences(payload, files);
 
   const projectId = generateId();
