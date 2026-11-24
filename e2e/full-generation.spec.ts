@@ -87,6 +87,7 @@ test('Author regenerates an affected suffix and deliberately requests a Variatio
   await expect(page.getByRole('button', { name: /Concept Screens/ }))
     .toContainText('Affected');
   await page.getByRole('button', { name: /Design Brief/ }).click();
+  await page.getByText('Generation settings and actions · Update available', { exact: true }).click();
   const update = page.getByRole('status', { name: 'Update available' });
   await expect(update).toContainText('shared Stage Prompt changed');
   await expect(update).toContainText('Design Brief, Concept Screens, PRD together');

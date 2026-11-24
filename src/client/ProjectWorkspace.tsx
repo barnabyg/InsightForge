@@ -555,6 +555,112 @@ export function ProjectWorkspace({
       : 1;
   const confirmedRunIsVariation = rerunPlan === null;
 
+  const showRunFirst = completeWorkflow || Boolean(candidate) || workflow.generatingStage === 'full_generation';
+  const runPanel = (
+    <section className={styles['full-generation-card']} aria-label="Full Generation">
+      <div className={styles['full-generation-heading']}>
+        <div>
+          <p className={styles.eyebrow}>One-pass workflow</p>
+          <h2>{completeWorkflow ? 'Your workflow is ready to review' : 'Generate the complete workflow'}</h2>
+          {completeWorkflow ? (
+            <nav className={styles['review-links']} aria-label="Review workflow">
+              {stageLink('design_brief', 'Review design brief', true)}
+              {stageLink('concept_screens', 'View concept screens')}
+              {stageLink('prd', 'Open PRD')}
+            </nav>
+          ) : <p>One Design Brief request, three sequential Concept Screens, and one PRD request. Current artifacts change only after the complete Candidate Workflow succeeds.</p>}
+        </div>
+        {!candidate
+          && !workflow.workflow?.insightRevision
+          && (!hasGeneratedArtifact || completeWorkflow)
+          && workflow.generatingStage !== 'full_generation' && (
+          <button
+            className={completeWorkflow && !rerunPlan
+              ? styles['secondary-action']
+              : styles['primary-action']}
+            type="button"
+            disabled={!insight.trim() || saveState === 'saving'}
+            onClick={() => {
+              if (completeWorkflow) {
+                setConfirmRerun(rerunStartFor('design_brief'));
+              } else {
+                setConfirmFullGeneration(true);
+              }
+            }}
+          >{completeWorkflow
+              ? rerunPlan
+                ? 'Regenerate complete workflow'
+                : 'Generate another full variation'
+              : 'Generate complete workflow'}</button>
+        )}
+      </div>
+
+      {workflow.generatingStage === 'full_generation' && (
+        <div
+          className={styles['full-generation-progress']}
+          role="status"
+          aria-label="Generating complete workflow"
+          aria-live="polite"
+        >
+          <div>
+            <strong>{fullProgressLabel}{fullProgress?.currentOrdinal ? ` · Screen ${fullProgress.currentOrdinal} of 3` : ''}</strong>
+            <span>{fullProgress?.completedOperationCount ?? candidate?.completedOperationCount ?? 0} of 5 operations complete · {elapsedSeconds}s elapsed</span>
+          </div>
+          <progress value={fullProgress?.completedOperationCount ?? candidate?.completedOperationCount ?? 0} max={5} />
+          <button
+            className={styles['secondary-action']}
+            type="button"
+            disabled={workflow.cancelling}
+            onClick={() => void workflow.cancelFullWorkflow().catch(() => undefined)}
+          >{workflow.cancelling ? 'Cancelling…' : 'Cancel after current operation'}</button>
+        </div>
+      )}
+
+      {candidate && workflow.generatingStage !== 'full_generation' && (
+        <div className={styles['candidate-summary']} role="status">
+          <div>
+            <strong>
+              {candidate.runKind === 'variation' ? 'Variation Run' : candidatePresentation?.heading}
+            </strong>
+            <span>{candidate.completedOperationCount} of 5 operations complete · {candidatePresentation?.locationPrefix} {fullStageName}</span>
+            {candidate.error && <p>{candidate.error.message}</p>}
+          </div>
+          {candidate.warnings.length > 0 && (
+            <div className={styles['candidate-warnings']}>
+              <strong>{candidate.warnings.length} sanity {candidate.warnings.length === 1 ? 'warning' : 'warnings'}</strong>
+              <ul>{candidate.warnings.map((warning) => (
+                <li key={`${warning.stageId}-${warning.code}`}>{warning.message}</li>
+              ))}</ul>
+            </div>
+          )}
+          <div className={styles['candidate-actions']}>
+            <button
+              className={candidatePresentation?.primaryAction === 'cancel'
+                ? styles['secondary-action']
+                : styles['primary-action']}
+              type="button"
+              onClick={() => {
+                void candidatePrimaryAction?.().catch(() => undefined);
+              }}
+            >{candidatePresentation?.primaryAction === 'resume' && candidate.currentStage === 'concept_screens'
+                ? `Resume from screen ${Math.max(1, Math.min(3, candidate.completedOperationCount))}`
+                : candidatePresentation?.primaryActionLabel}</button>
+            {candidatePresentation?.canKeep && (
+              <button className={styles['secondary-action']} type="button" onClick={() => {
+                void workflow.keepCandidateAfterWarningReview().catch(() => undefined);
+              }}>Keep Candidate Workflow</button>
+            )}
+            {candidatePresentation?.canDiscard && (
+              <button className={styles['danger-action']} type="button" onClick={() => {
+                void workflow.discardFullWorkflow().catch(() => undefined);
+              }}>Discard Candidate Workflow</button>
+            )}
+          </div>
+        </div>
+      )}
+    </section>
+  );
+
   return (
     <div className={styles['project-workspace']}>
       <aside className={styles['stage-rail']} aria-label="Project stages">
@@ -633,6 +739,8 @@ export function ProjectWorkspace({
             ><span aria-hidden="true" /> {savePresentation.visible}</span>
           </header>
 
+          {showRunFirst && runPanel}
+
           <section className={styles['insight-editor']} aria-labelledby="insight-title">
             <div className={styles['editor-heading']}>
               <div>
@@ -697,108 +805,7 @@ export function ProjectWorkspace({
             </div>
           )}
 
-          <section className={styles['full-generation-card']} aria-label="Full Generation">
-            <div className={styles['full-generation-heading']}>
-              <div>
-                <p className={styles.eyebrow}>One-pass workflow</p>
-                <h2>{completeWorkflow ? 'Your workflow is ready to review' : 'Generate the complete workflow'}</h2>
-                {completeWorkflow ? (
-                  <nav className={styles['review-links']} aria-label="Review workflow">
-                    {stageLink('design_brief', 'Review design brief', true)}
-                    {stageLink('concept_screens', 'View concept screens')}
-                    {stageLink('prd', 'Open PRD')}
-                  </nav>
-                ) : <p>One Design Brief request, three sequential Concept Screens, and one PRD request. Current artifacts change only after the complete Candidate Workflow succeeds.</p>}
-              </div>
-              {!candidate
-                && !workflow.workflow?.insightRevision
-                && (!hasGeneratedArtifact || completeWorkflow)
-                && workflow.generatingStage !== 'full_generation' && (
-                <button
-                  className={completeWorkflow && !rerunPlan
-                    ? styles['secondary-action']
-                    : styles['primary-action']}
-                  type="button"
-                  disabled={!insight.trim() || saveState === 'saving'}
-                  onClick={() => {
-                    if (completeWorkflow) {
-                      setConfirmRerun(rerunStartFor('design_brief'));
-                    } else {
-                      setConfirmFullGeneration(true);
-                    }
-                  }}
-                >{completeWorkflow
-                    ? rerunPlan
-                      ? 'Regenerate complete workflow'
-                      : 'Generate another full variation'
-                    : 'Generate complete workflow'}</button>
-              )}
-            </div>
-
-            {workflow.generatingStage === 'full_generation' && (
-              <div
-                className={styles['full-generation-progress']}
-                role="status"
-                aria-label="Generating complete workflow"
-                aria-live="polite"
-              >
-                <div>
-                  <strong>{fullProgressLabel}{fullProgress?.currentOrdinal ? ` · Screen ${fullProgress.currentOrdinal} of 3` : ''}</strong>
-                  <span>{fullProgress?.completedOperationCount ?? candidate?.completedOperationCount ?? 0} of 5 operations complete · {elapsedSeconds}s elapsed</span>
-                </div>
-                <progress value={fullProgress?.completedOperationCount ?? candidate?.completedOperationCount ?? 0} max={5} />
-                <button
-                  className={styles['secondary-action']}
-                  type="button"
-                  disabled={workflow.cancelling}
-                  onClick={() => void workflow.cancelFullWorkflow().catch(() => undefined)}
-                >{workflow.cancelling ? 'Cancelling…' : 'Cancel after current operation'}</button>
-              </div>
-            )}
-
-            {candidate && workflow.generatingStage !== 'full_generation' && (
-              <div className={styles['candidate-summary']} role="status">
-                <div>
-                  <strong>
-                    {candidate.runKind === 'variation' ? 'Variation Run' : candidatePresentation?.heading}
-                  </strong>
-                  <span>{candidate.completedOperationCount} of 5 operations complete · {candidatePresentation?.locationPrefix} {fullStageName}</span>
-                  {candidate.error && <p>{candidate.error.message}</p>}
-                </div>
-                {candidate.warnings.length > 0 && (
-                  <div className={styles['candidate-warnings']}>
-                    <strong>{candidate.warnings.length} sanity {candidate.warnings.length === 1 ? 'warning' : 'warnings'}</strong>
-                    <ul>{candidate.warnings.map((warning) => (
-                      <li key={`${warning.stageId}-${warning.code}`}>{warning.message}</li>
-                    ))}</ul>
-                  </div>
-                )}
-                <div className={styles['candidate-actions']}>
-                  <button
-                    className={candidatePresentation?.primaryAction === 'cancel'
-                      ? styles['secondary-action']
-                      : styles['primary-action']}
-                    type="button"
-                    onClick={() => {
-                      void candidatePrimaryAction?.().catch(() => undefined);
-                    }}
-                  >{candidatePresentation?.primaryAction === 'resume' && candidate.currentStage === 'concept_screens'
-                      ? `Resume from screen ${Math.max(1, Math.min(3, candidate.completedOperationCount))}`
-                      : candidatePresentation?.primaryActionLabel}</button>
-                  {candidatePresentation?.canKeep && (
-                    <button className={styles['secondary-action']} type="button" onClick={() => {
-                      void workflow.keepCandidateAfterWarningReview().catch(() => undefined);
-                    }}>Keep Candidate Workflow</button>
-                  )}
-                  {candidatePresentation?.canDiscard && (
-                    <button className={styles['danger-action']} type="button" onClick={() => {
-                      void workflow.discardFullWorkflow().catch(() => undefined);
-                    }}>Discard Candidate Workflow</button>
-                  )}
-                </div>
-              </div>
-            )}
-          </section>
+          {!showRunFirst && runPanel}
 
           <aside className={styles['iteration-note']}>
             <span className={styles['iteration-mark']} aria-hidden="true">01</span>
@@ -836,37 +843,36 @@ export function ProjectWorkspace({
             <div className={styles['design-brief-main']}>
               <details className={styles['generation-settings']}
                 key={workflow.workflow?.designBrief?.id ?? 'empty'}
-                open={!workflow.workflow?.designBrief || Boolean(rerunPlan) || workflow.workflow?.lastDesignBriefRun?.status === 'failed'}>
-                <summary>Generation settings and actions</summary>
-                <section className={styles['stage-action-card']} aria-label="Design Brief generation">
-                <div>
-                  <p className={styles.eyebrow}>Shared Stage Configuration</p>
-                  <strong>{workflow.workflow?.designBriefConfiguration.model ?? 'Loading model…'}</strong>
-                  <span>Uses the active Design Brief prompt and protected Insight Source input.</span>
-                </div>
-                <a
-                  onClick={followWorkspaceLink}
-                  href={`/?view=prompts&stage=design_brief&from=${encodeURIComponent(project.id)}`}
-                >Edit Design Brief prompt</a>
-                <button
-                  className={styles['primary-action']}
-                  type="button"
-                  disabled={workflow.loading || workflow.generating || (
-                    !completeWorkflow && !workflow.workflow?.canGenerateDesignBrief
-                  ) || (hasCurrentArtifact('design_brief') && !rerunPlan)}
-                  onClick={() => requestRegeneration('design_brief')}
-                >
-                  {activeStage === 'design_brief'
-                    ? 'Generating…'
-                    : rerunPlan || hasCurrentArtifact('design_brief')
-                      ? completeWorkflowActionLabel('design_brief')
-                      : 'Generate Design Brief'}
-                </button>
-                {variationAction('design_brief')}
-              </section>
+                open={!workflow.workflow?.designBrief || workflow.workflow?.lastDesignBriefRun?.status === 'failed'}>
+                <summary>Generation settings and actions{affectedStage('design_brief') && ' · Update available'}</summary>
+                  <section className={styles['stage-action-card']} aria-label="Design Brief generation">
+                  <div>
+                    <p className={styles.eyebrow}>Shared Stage Configuration</p>
+                    <strong>{workflow.workflow?.designBriefConfiguration.model ?? 'Loading model…'}</strong>
+                    <span>Uses the active Design Brief prompt and protected Insight Source input.</span>
+                  </div>
+                  <a
+                    onClick={followWorkspaceLink}
+                    href={`/?view=prompts&stage=design_brief&from=${encodeURIComponent(project.id)}`}
+                  >Edit Design Brief prompt</a>
+                  <button
+                    className={styles['primary-action']}
+                    type="button"
+                    disabled={workflow.loading || workflow.generating || (
+                      !completeWorkflow && !workflow.workflow?.canGenerateDesignBrief
+                    ) || (hasCurrentArtifact('design_brief') && !rerunPlan)}
+                    onClick={() => requestRegeneration('design_brief')}
+                  >
+                    {activeStage === 'design_brief'
+                      ? 'Generating…'
+                      : rerunPlan || hasCurrentArtifact('design_brief')
+                        ? completeWorkflowActionLabel('design_brief')
+                        : 'Generate Design Brief'}
+                  </button>
+                  {variationAction('design_brief')}
+                </section>
+                {updateAvailableNotice('design_brief')}
               </details>
-
-              {updateAvailableNotice('design_brief')}
 
               {!completeWorkflow && workflow.workflow?.generationBlocker && (
                 <p className={styles['generation-blocker']}>{workflow.workflow.generationBlocker}</p>
@@ -919,51 +925,50 @@ export function ProjectWorkspace({
             <div className={styles['design-brief-main']}>
               <details className={styles['generation-settings']}
                 key={workflow.workflow?.conceptScreenSet?.id ?? 'empty'}
-                open={!workflow.workflow?.conceptScreenSet || Boolean(rerunPlan) || workflow.workflow?.lastConceptScreenRun?.status === 'failed'}>
-                <summary>Generation settings and actions</summary>
-                <section className={styles['stage-action-card']} aria-label="Concept Screen generation">
-                <div>
-                  <p className={styles.eyebrow}>Shared Stage Configuration</p>
-                  <strong>{workflow.workflow?.conceptScreenConfiguration.model ?? 'Loading model…'}</strong>
-                  <span>
-                    {workflow.workflow?.conceptScreenConfiguration.imageQuality ?? '—'} quality · three sequential PNG operations using the protected Design Brief.
-                  </span>
-                </div>
-                <a
-                  onClick={followWorkspaceLink}
-                  href={`/?view=prompts&stage=concept_screens&from=${encodeURIComponent(project.id)}`}
-                >Edit Concept Screens prompt</a>
-                {workflow.generatingStage === 'concept_screens' ? (
-                  <button
-                    className={styles['secondary-action']}
-                    type="button"
-                    disabled={workflow.cancelling}
-                    onClick={() => void workflow.cancelConceptScreens().catch(() => undefined)}
-                  >{workflow.cancelling ? 'Cancelling…' : 'Cancel after current screen'}</button>
-                ) : (
-                  <button
-                    className={styles['primary-action']}
-                    type="button"
-                    disabled={workflow.loading || workflow.generating || (
-                      !completeWorkflow && !workflow.workflow?.canGenerateConceptScreens
-                    ) || (hasCurrentArtifact('concept_screens') && !rerunPlan)}
-                    onClick={() => requestRegeneration('concept_screens')}
-                  >
-                    {rerunPlan || hasCurrentArtifact('concept_screens')
-                      ? completeWorkflowActionLabel('concept_screens')
-                      : workflow.workflow?.lastConceptScreenRun
-                      && workflow.workflow.lastConceptScreenRun.status !== 'succeeded'
-                      && workflow.workflow.lastConceptScreenRun.completedOperationCount < 3
-                      ? `Resume from Screen ${workflow.workflow.lastConceptScreenRun.completedOperationCount + 1}`
-                      : 'Generate Concept Screens'}
-                  </button>
-                )}
-                {workflow.generatingStage !== 'concept_screens'
-                  && variationAction('concept_screens')}
-              </section>
+                open={!workflow.workflow?.conceptScreenSet || workflow.workflow?.lastConceptScreenRun?.status === 'failed'}>
+                <summary>Generation settings and actions{affectedStage('concept_screens') && ' · Update available'}</summary>
+                  <section className={styles['stage-action-card']} aria-label="Concept Screen generation">
+                  <div>
+                    <p className={styles.eyebrow}>Shared Stage Configuration</p>
+                    <strong>{workflow.workflow?.conceptScreenConfiguration.model ?? 'Loading model…'}</strong>
+                    <span>
+                      {workflow.workflow?.conceptScreenConfiguration.imageQuality ?? '—'} quality · three sequential PNG operations using the protected Design Brief.
+                    </span>
+                  </div>
+                  <a
+                    onClick={followWorkspaceLink}
+                    href={`/?view=prompts&stage=concept_screens&from=${encodeURIComponent(project.id)}`}
+                  >Edit Concept Screens prompt</a>
+                  {workflow.generatingStage === 'concept_screens' ? (
+                    <button
+                      className={styles['secondary-action']}
+                      type="button"
+                      disabled={workflow.cancelling}
+                      onClick={() => void workflow.cancelConceptScreens().catch(() => undefined)}
+                    >{workflow.cancelling ? 'Cancelling…' : 'Cancel after current screen'}</button>
+                  ) : (
+                    <button
+                      className={styles['primary-action']}
+                      type="button"
+                      disabled={workflow.loading || workflow.generating || (
+                        !completeWorkflow && !workflow.workflow?.canGenerateConceptScreens
+                      ) || (hasCurrentArtifact('concept_screens') && !rerunPlan)}
+                      onClick={() => requestRegeneration('concept_screens')}
+                    >
+                      {rerunPlan || hasCurrentArtifact('concept_screens')
+                        ? completeWorkflowActionLabel('concept_screens')
+                        : workflow.workflow?.lastConceptScreenRun
+                        && workflow.workflow.lastConceptScreenRun.status !== 'succeeded'
+                        && workflow.workflow.lastConceptScreenRun.completedOperationCount < 3
+                        ? `Resume from Screen ${workflow.workflow.lastConceptScreenRun.completedOperationCount + 1}`
+                        : 'Generate Concept Screens'}
+                    </button>
+                  )}
+                  {workflow.generatingStage !== 'concept_screens'
+                    && variationAction('concept_screens')}
+                </section>
+                {updateAvailableNotice('concept_screens')}
               </details>
-
-              {updateAvailableNotice('concept_screens')}
 
               {!completeWorkflow && workflow.workflow?.conceptScreenGenerationBlocker && (
                 <p className={styles['generation-blocker']}>{workflow.workflow.conceptScreenGenerationBlocker}</p>
@@ -1018,37 +1023,36 @@ export function ProjectWorkspace({
             <div className={styles['design-brief-main']}>
               <details className={styles['generation-settings']}
                 key={workflow.workflow?.prd?.id ?? 'empty'}
-                open={!workflow.workflow?.prd || Boolean(rerunPlan) || workflow.workflow?.lastPrdRun?.status === 'failed'}>
-                <summary>Generation settings and actions</summary>
-                <section className={styles['stage-action-card']} aria-label="PRD generation">
-                <div>
-                  <p className={styles.eyebrow}>Shared Stage Configuration</p>
-                  <strong>{workflow.workflow?.prdConfiguration.model ?? 'Loading model…'}</strong>
-                  <span>Uses the protected Design Brief and all three current Concept Screens. The Insight Source is not attached separately.</span>
-                </div>
-                <a
-                  onClick={followWorkspaceLink}
-                  href={`/?view=prompts&stage=prd&from=${encodeURIComponent(project.id)}`}
-                >Edit PRD prompt</a>
-                <button
-                  className={styles['primary-action']}
-                  type="button"
-                  disabled={workflow.loading || workflow.generating || (
-                    !completeWorkflow && !workflow.workflow?.canGeneratePrd
-                  ) || (hasCurrentArtifact('prd') && !rerunPlan)}
-                  onClick={() => requestRegeneration('prd')}
-                >
-                  {workflow.generatingStage === 'prd'
-                    ? 'Generating…'
-                    : rerunPlan || hasCurrentArtifact('prd')
-                      ? completeWorkflowActionLabel('prd')
-                      : 'Generate PRD'}
-                </button>
-                {variationAction('prd')}
-              </section>
+                open={!workflow.workflow?.prd || workflow.workflow?.lastPrdRun?.status === 'failed'}>
+                <summary>Generation settings and actions{affectedStage('prd') && ' · Update available'}</summary>
+                  <section className={styles['stage-action-card']} aria-label="PRD generation">
+                  <div>
+                    <p className={styles.eyebrow}>Shared Stage Configuration</p>
+                    <strong>{workflow.workflow?.prdConfiguration.model ?? 'Loading model…'}</strong>
+                    <span>Uses the protected Design Brief and all three current Concept Screens. The Insight Source is not attached separately.</span>
+                  </div>
+                  <a
+                    onClick={followWorkspaceLink}
+                    href={`/?view=prompts&stage=prd&from=${encodeURIComponent(project.id)}`}
+                  >Edit PRD prompt</a>
+                  <button
+                    className={styles['primary-action']}
+                    type="button"
+                    disabled={workflow.loading || workflow.generating || (
+                      !completeWorkflow && !workflow.workflow?.canGeneratePrd
+                    ) || (hasCurrentArtifact('prd') && !rerunPlan)}
+                    onClick={() => requestRegeneration('prd')}
+                  >
+                    {workflow.generatingStage === 'prd'
+                      ? 'Generating…'
+                      : rerunPlan || hasCurrentArtifact('prd')
+                        ? completeWorkflowActionLabel('prd')
+                        : 'Generate PRD'}
+                  </button>
+                  {variationAction('prd')}
+                </section>
+                {updateAvailableNotice('prd')}
               </details>
-
-              {updateAvailableNotice('prd')}
 
               {workflow.workflow?.prdGenerationBlocker && (
                 <p className={styles['generation-blocker']}>{workflow.workflow.prdGenerationBlocker}</p>
