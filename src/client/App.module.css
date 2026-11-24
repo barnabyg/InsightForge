@@ -2057,6 +2057,9 @@ a {
   box-shadow: 0 14px 36px rgb(54 49 40 / 6%);
 }
 
+.markdown-artifact mark { background: #ffe69b; color: var(--ink); }
+.markdown-artifact mark[aria-current] { background: #ffbf54; outline: 2px solid #714b10; }
+
 .artifact-toolbar {
   min-height: 55px;
   padding: 9px 13px;

@@ -28,6 +28,17 @@ test('Author generates and inspects a persisted PRD from the Design Brief and Co
   await expect(artifact).toContainText('FR-001');
   await expect(artifact.getByRole('button', { name: 'Download .md' })).toBeVisible();
 
+  const search = page.getByRole('searchbox', { name: 'Search PRD' });
+  await search.fill('FR-');
+  const hits = page.locator('mark');
+  expect(await hits.count()).toBeGreaterThan(1);
+  await expect(hits.first()).toHaveAttribute('aria-current', 'true');
+  await search.press('Enter');
+  await expect(hits.nth(1)).toHaveAttribute('aria-current', 'true');
+  await search.press('Shift+Enter');
+  await expect(hits.first()).toHaveAttribute('aria-current', 'true');
+  await search.fill('FR-001');
+  await expect(page.locator('mark[aria-current]')).toBeInViewport();
   await page.setViewportSize({ width: 390, height: 844 });
   const inspector = page.getByRole('complementary', { name: 'Run Inspector' });
   const documentBox = await page.getByRole('article', { name: 'PRD Artifact' }).boundingBox();
