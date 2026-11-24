@@ -1052,11 +1052,14 @@ export async function openWorkflowService(
     if (!snapshot) {
       throw new WorkflowValidationError('Workflow Snapshot was not found.');
     }
-    const artifactIds = [
-      snapshot.design_brief_artifact_id,
-      snapshot.concept_screen_artifact_id,
-      snapshot.prd_artifact_id,
-    ].filter((value): value is string => Boolean(value));
+    // Release downstream runs first. A restored copy can still consume the original
+    // upstream artifact by ID, even after its snapshot has been removed.
+    const artifactIds = database.prepare(`
+      SELECT id FROM artifacts WHERE project_id = ? AND run_id IN (
+        SELECT run_id FROM artifacts WHERE id IN (?, ?, ?)
+      ) ORDER BY CASE stage_id WHEN 'prd' THEN 0 WHEN 'concept_screens' THEN 1 ELSE 2 END
+    `).all(projectId, snapshot.prd_artifact_id, snapshot.concept_screen_artifact_id,
+      snapshot.design_brief_artifact_id) as unknown as Array<{ id: string }>;
     const assetBackups: Array<{
       path: string;
       bytes: Buffer;
@@ -1065,7 +1068,7 @@ export async function openWorkflowService(
     database.exec('BEGIN IMMEDIATE;');
     try {
       database.prepare('DELETE FROM workflow_snapshots WHERE id = ?').run(snapshotId);
-      for (const artifactId of new Set(artifactIds)) {
+      for (const { id: artifactId } of artifactIds) {
         const reference = database.prepare(`
           SELECT (
             EXISTS(SELECT 1 FROM current_artifacts WHERE artifact_id = ?)
@@ -1082,12 +1085,15 @@ export async function openWorkflowService(
                  OR prd_artifact_id = ?
             )
             OR EXISTS(SELECT 1 FROM pending_cascades WHERE design_brief_artifact_id = ?)
+            OR EXISTS(SELECT 1 FROM stage_runs WHERE project_id = ? AND (
+              input_artifact_id = ? OR json_extract(input_lineage_json, '$.conceptScreenSet.artifactId') = ?
+            ))
           ) AS referenced
         `).get(
           artifactId,
           artifactId, artifactId, artifactId,
           artifactId, artifactId, artifactId,
-          artifactId,
+          artifactId, projectId, artifactId, artifactId,
         ) as unknown as { referenced: number };
         if (reference.referenced) continue;
         const artifact = database.prepare(

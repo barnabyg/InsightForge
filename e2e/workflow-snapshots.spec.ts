@@ -83,6 +83,10 @@ test('restored backups reopen with all artifacts and their preserved history', a
   await page.getByRole('button', { name: 'Restore snapshot' }).last().click();
   await page.getByRole('button', { name: 'Restore Workflow Snapshot', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Workflow history, 3 snapshots' })).toBeVisible();
+  await page.getByRole('button', { name: 'Workflow history, 3 snapshots' }).click();
+  await page.getByRole('button', { name: 'Delete snapshot' }).last().click();
+  await page.getByRole('dialog').getByRole('button', { name: 'Delete Workflow Snapshot' }).click();
+  await page.getByRole('button', { name: 'Close history' }).click();
   await page.getByRole('link', { name: 'All projects' }).click();
   const originalExport = await card.locator('a[download]').first().getAttribute('href');
   const downloading = page.waitForEvent('download');
@@ -96,7 +100,7 @@ test('restored backups reopen with all artifacts and their preserved history', a
   const copy = page.getByRole('article', { name: /Review backup integrity/ })
     .filter({ hasNot: page.locator(`a[href="${originalExport}"]`) });
   await copy.getByRole('button', { name: /Open Project/ }).click();
-  await expect(page.getByRole('button', { name: 'Workflow history, 3 snapshots' })).toBeVisible();
+  await expect(page.getByRole('button', { name: 'Workflow history, 2 snapshots' })).toBeVisible();
   const rail = page.getByRole('complementary', { name: 'Project stages' });
   await rail.getByRole('button', { name: /Design Brief/ }).click();
   await expect(page.getByRole('article', { name: 'Design Brief Artifact' })).toBeVisible();
