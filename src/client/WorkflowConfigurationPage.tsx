@@ -7,6 +7,7 @@ import type {
   StageId,
   StageInputId,
 } from '../shared/workflow-configuration.js';
+import { followWorkspaceLink } from './navigation.js';
 import { Modal } from './Modal.js';
 import styles from './App.module.css';
 import { useWorkflowConfiguration } from './useWorkflowConfiguration.js';
@@ -411,7 +412,7 @@ export function WorkflowConfigurationPage() {
 
   return (
     <main className={styles['configuration-page']}>
-      {origin && <a className={styles['back-link']}
+      {origin && <a onClick={followWorkspaceLink} className={styles['back-link']}
         href={`/?project=${encodeURIComponent(origin)}&stage=${initialStage}`}>
         Return to {controller.configuration.stages.find(item => item.id === initialStage)?.name}
       </a>}

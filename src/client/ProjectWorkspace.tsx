@@ -9,6 +9,7 @@ import type { Project } from '../shared/projects.js';
 import { MarkdownArtifact } from './MarkdownArtifact.js';
 import { ConceptScreenGallery } from './ConceptScreenGallery.js';
 import { ConceptScreenRunInspector } from './ConceptScreenRunInspector.js';
+import { followWorkspaceLink } from './navigation.js';
 import { Modal } from './Modal.js';
 import { RunInspector } from './RunInspector.js';
 import { useProjectWorkflow } from './useProjectWorkflow.js';
@@ -844,6 +845,7 @@ export function ProjectWorkspace({
                   <span>Uses the active Design Brief prompt and protected Insight Source input.</span>
                 </div>
                 <a
+                  onClick={followWorkspaceLink}
                   href={`/?view=prompts&stage=design_brief&from=${encodeURIComponent(project.id)}`}
                 >Edit Design Brief prompt</a>
                 <button
@@ -928,6 +930,7 @@ export function ProjectWorkspace({
                   </span>
                 </div>
                 <a
+                  onClick={followWorkspaceLink}
                   href={`/?view=prompts&stage=concept_screens&from=${encodeURIComponent(project.id)}`}
                 >Edit Concept Screens prompt</a>
                 {workflow.generatingStage === 'concept_screens' ? (
@@ -1024,6 +1027,7 @@ export function ProjectWorkspace({
                   <span>Uses the protected Design Brief and all three current Concept Screens. The Insight Source is not attached separately.</span>
                 </div>
                 <a
+                  onClick={followWorkspaceLink}
                   href={`/?view=prompts&stage=prd&from=${encodeURIComponent(project.id)}`}
                 >Edit PRD prompt</a>
                 <button
