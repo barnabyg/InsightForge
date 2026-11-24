@@ -112,3 +112,16 @@ test('Author safely improves and restores the shared workflow configuration', as
   await resetDialog.getByRole('button', { name: 'Reset workflow' }).click();
   await expect(designPrompt).toHaveValue(/experienced product designer/);
 });
+
+test('PRD prompt editing returns to the originating project stage', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await page.getByRole('button', { name: /04.*PRD/ }).click();
+  await page.getByRole('link', { name: 'Edit PRD prompt' }).click();
+  await expect(page.getByRole('tab', { name: /PRD/ })).toHaveAttribute('aria-selected', 'true');
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'PRD', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Edit PRD prompt' }).click();
+  await page.getByRole('link', { name: 'Return to PRD' }).click();
+  await expect(page.getByRole('heading', { name: 'PRD', exact: true })).toBeVisible();
+});

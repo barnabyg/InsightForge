@@ -18,7 +18,6 @@ import styles from './App.module.css';
 interface ProjectWorkspaceProps {
   project: Project;
   onShowLibrary(): void;
-  onEditPrompts(): void;
   onSaveInsight(insightSource: string): Promise<Project>;
   onRevisionPromoted(): Promise<Project>;
 }
@@ -102,11 +101,13 @@ const candidatePresentationByStatus = {
 export function ProjectWorkspace({
   project,
   onShowLibrary,
-  onEditPrompts,
   onSaveInsight,
   onRevisionPromoted,
 }: ProjectWorkspaceProps) {
-  const [selectedStage, setSelectedStage] = useState<SelectedStage>('insight_source');
+  const [selectedStage, setSelectedStage] = useState<SelectedStage>(() => {
+    const stage = new URLSearchParams(location.search).get('stage');
+    return generatedStageIds.find(id => id === stage) ?? 'insight_source';
+  });
   const [insight, setInsight] = useState(project.insightSource);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
@@ -253,6 +254,9 @@ export function ProjectWorkspace({
         return;
       }
     }
+    const url = new URL(window.location.href);
+    url.searchParams.set('stage', stage);
+    window.history.replaceState(null, '', url);
     setSelectedStage(stage);
   }
 
@@ -803,12 +807,8 @@ export function ProjectWorkspace({
                   <span>Uses the active Design Brief prompt and protected Insight Source input.</span>
                 </div>
                 <a
-                  href="/?view=prompts"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onEditPrompts();
-                  }}
-                >Edit shared prompt</a>
+                  href={`/?view=prompts&stage=design_brief&from=${encodeURIComponent(project.id)}`}
+                >Edit Design Brief prompt</a>
                 <button
                   className={styles['primary-action']}
                   type="button"
@@ -885,12 +885,8 @@ export function ProjectWorkspace({
                   </span>
                 </div>
                 <a
-                  href="/?view=prompts"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onEditPrompts();
-                  }}
-                >Edit shared prompt</a>
+                  href={`/?view=prompts&stage=concept_screens&from=${encodeURIComponent(project.id)}`}
+                >Edit Concept Screens prompt</a>
                 {workflow.generatingStage === 'concept_screens' ? (
                   <button
                     className={styles['secondary-action']}
@@ -980,12 +976,8 @@ export function ProjectWorkspace({
                   <span>Uses the protected Design Brief and all three current Concept Screens. The Insight Source is not attached separately.</span>
                 </div>
                 <a
-                  href="/?view=prompts"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    onEditPrompts();
-                  }}
-                >Edit shared prompt</a>
+                  href={`/?view=prompts&stage=prd&from=${encodeURIComponent(project.id)}`}
+                >Edit PRD prompt</a>
                 <button
                   className={styles['primary-action']}
                   type="button"

@@ -75,10 +75,6 @@ export function App() {
         <ProjectWorkspace
           project={projects.currentProject}
           onShowLibrary={projects.showLibrary}
-          onEditPrompts={() => {
-            projects.showLibrary();
-            showView('prompts');
-          }}
           onSaveInsight={(insightSource) =>
             projects.updateInsightSource(projects.currentProject!.id, insightSource)}
           onRevisionPromoted={projects.refreshCurrentProject}

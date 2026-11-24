@@ -376,7 +376,12 @@ interface PendingImport {
 
 export function WorkflowConfigurationPage() {
   const controller = useWorkflowConfiguration();
-  const [selectedStage, setSelectedStage] = useState<StageId>('design_brief');
+  const params = new URLSearchParams(window.location.search);
+  const origin = params.get('from');
+  const originStage = params.get('stage');
+  const initialStage = originStage === 'concept_screens' || originStage === 'prd'
+    ? originStage : 'design_brief';
+  const [selectedStage, setSelectedStage] = useState<StageId>(initialStage);
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
   const [resetAllOpen, setResetAllOpen] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
@@ -404,6 +409,10 @@ export function WorkflowConfigurationPage() {
 
   return (
     <main className={styles['configuration-page']}>
+      {origin && <a className={styles['back-link']}
+        href={`/?project=${encodeURIComponent(origin)}&stage=${initialStage}`}>
+        Return to {controller.configuration.stages.find(item => item.id === initialStage)?.name}
+      </a>}
       <header className={styles['configuration-hero']}>
         <div>
           <p className={styles.eyebrow}>The reusable heart of InsightForge</p>
