@@ -40,7 +40,10 @@ test('Author generates and inspects a persisted PRD from the Design Brief and Co
   await search.fill('FR-001');
   await expect(page.locator('mark[aria-current]')).toBeInViewport();
   await page.setViewportSize({ width: 390, height: 844 });
+  await page.evaluate(() => window.scrollTo(0, 0));
   const inspector = page.getByRole('complementary', { name: 'Run Inspector' });
+  await expect(page.getByRole('complementary', { name: 'Project stages' })
+    .getByRole('button', { name: /PRD/ })).toBeInViewport();
   const documentBox = await page.getByRole('article', { name: 'PRD Artifact' }).boundingBox();
   expect(documentBox!.y).toBeLessThan((await inspector.boundingBox())!.y);
   await inspector.getByText(/Run details/).click();

@@ -109,6 +109,22 @@ export function ProjectWorkspace({
     const stage = new URLSearchParams(location.search).get('stage');
     return generatedStageIds.find(id => id === stage) ?? 'insight_source';
   });
+  const stageList = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    const list = stageList.current;
+    const step = list?.querySelector('[aria-current="step"]');
+    if (!list || !step) return;
+    const revealStep = () => {
+      const viewport = list.getBoundingClientRect();
+      const item = step.getBoundingClientRect();
+      if (item.right > viewport.right) list.scrollLeft += item.right - viewport.right;
+      else if (item.left < viewport.left) list.scrollLeft += item.left - viewport.left;
+    };
+    const observer = new ResizeObserver(revealStep);
+    observer.observe(list);
+    revealStep();
+    return () => observer.disconnect();
+  }, [selectedStage]);
   const [insight, setInsight] = useState(project.insightSource);
   const [saveState, setSaveState] = useState<SaveState>('saved');
   const [pendingImport, setPendingImport] = useState<PendingImport | null>(null);
@@ -681,7 +697,7 @@ export function ProjectWorkspace({
         >
           <span aria-hidden="true">←</span> All projects
         </a>
-        <ol>
+        <ol ref={stageList}>
           <li className={selectedStage === 'insight_source' ? styles['stage-rail-active'] : ''}>
             <button type="button" aria-current={selectedStage === 'insight_source' ? 'step' : undefined}
               onClick={() => void selectStage('insight_source')}>
