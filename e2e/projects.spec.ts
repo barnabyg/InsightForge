@@ -1,4 +1,6 @@
 import { expect, test } from '@playwright/test';
+import { readFile } from 'node:fs/promises';
+import { strFromU8, unzipSync } from 'fflate';
 
 test('Author creates, imports, saves, and manages Projects', async ({ page }) => {
   await page.goto('/');
@@ -51,7 +53,38 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
 
   const renamedCard = page.getByRole('article', {
     name: 'Confident retrofit choices',
+    exact: true,
   });
+  const projectExportDownload = page.waitForEvent('download');
+  await renamedCard.getByRole('link', { name: 'Back up project' }).click();
+  const projectExport = await projectExportDownload;
+  expect(projectExport.suggestedFilename()).toBe(
+    'confident-retrofit-choices-project-export.zip',
+  );
+  const projectExportPath = await projectExport.path();
+  expect(projectExportPath).not.toBeNull();
+  const projectExportFiles = unzipSync(await readFile(projectExportPath!));
+  expect(JSON.parse(strFromU8(projectExportFiles['manifest.json']))).toMatchObject({
+    format: 'insightforge.project-export',
+    schemaVersion: 1,
+    project: { name: 'Confident retrofit choices' },
+  });
+  expect(JSON.parse(strFromU8(projectExportFiles['project.json']))).toMatchObject({
+    project: {
+      name: 'Confident retrofit choices',
+      insightSource: '# Installer confidence\n\nQuotes hide important trade-offs.',
+    },
+  });
+
+  await page.getByLabel('Import Project file').setInputFiles({
+    name: 'confident-retrofit-choices-project-export.zip',
+    mimeType: 'application/zip',
+    buffer: await readFile(projectExportPath!),
+  });
+  await expect(
+    page.getByRole('article', { name: 'Confident retrofit choices (Imported)' }),
+  ).toBeVisible();
+
   await renamedCard.getByRole('button', { name: 'Duplicate project' }).click();
   await expect(
     page.getByRole('article', { name: 'Confident retrofit choices — Copy' }),
@@ -74,7 +107,7 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
   );
   await page.getByRole('link', { name: 'All projects' }).click();
   await page
-    .getByRole('article', { name: 'Confident retrofit choices' })
+    .getByRole('article', { name: 'Confident retrofit choices', exact: true })
     .getByRole('button', { name: /Confident retrofit choices/ })
     .click();
   await expect(page.getByRole('textbox', { name: 'Insight Source' })).toHaveValue(
@@ -83,6 +116,6 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
 
   await page.goBack();
   await expect(
-    page.getByRole('heading', { name: 'Recent lines of thought' }),
+    page.getByRole('heading', { name: 'Recent projects' }),
   ).toBeVisible();
 });

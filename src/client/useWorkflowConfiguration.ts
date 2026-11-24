@@ -21,11 +21,13 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export interface WorkflowConfigurationController {
+  loadError: string | null;
+  retryLoad(): void;
   configuration: WorkflowConfiguration | null;
   models: ModelCatalog | null;
   loading: boolean;
   error: string | null;
-  savePromptDraft(stageId: StageId, prompt: string): Promise<void>;
+  savePromptDraft(stageId: StageId, draft: CommitStageConfigurationInput): Promise<void>;
   discardPromptDraft(stageId: StageId): Promise<void>;
   saveStage(stageId: StageId, input: CommitStageConfigurationInput): Promise<void>;
   resetStage(stageId: StageId): Promise<void>;
@@ -42,33 +44,36 @@ export function useWorkflowConfiguration(): WorkflowConfigurationController {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [configurationAttempt, setConfigurationAttempt] = useState(0);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const [configurationFailed, setConfigurationFailed] = useState(false);
+  const [catalogFailed, setCatalogFailed] = useState(false);
+
   useEffect(() => {
     let active = true;
-    async function load() {
-      try {
-        const [loadedConfiguration, loadedModels] = await Promise.all([
-          requestJson<WorkflowConfiguration>('/api/workflow-configuration'),
-          requestJson<ModelCatalog>('/api/models'),
-        ]);
-        if (active) {
-          setConfiguration(loadedConfiguration);
-          setModels(loadedModels);
-        }
-      } catch (loadError) {
-        if (active) {
-          setError(loadError instanceof Error
-            ? loadError.message
-            : 'Workflow Configuration could not be loaded');
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
-    }
-    void load();
-    return () => {
-      active = false;
-    };
-  }, []);
+    setLoading(true);
+    setConfigurationFailed(false);
+    void requestJson<WorkflowConfiguration>('/api/workflow-configuration')
+      .then(value => { if (active) setConfiguration(value); })
+      .catch(() => { if (active) setConfigurationFailed(true); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [configurationAttempt]);
+
+  useEffect(() => {
+    let active = true;
+    setCatalogFailed(false);
+    void requestJson<ModelCatalog>('/api/models')
+      .then(value => { if (active) setModels(value); })
+      .catch(() => { if (active) setCatalogFailed(true); });
+    return () => { active = false; };
+  }, [catalogAttempt]);
+
+  const failedResources = [
+    configurationFailed && 'shared configuration',
+    catalogFailed && 'model catalog',
+  ].filter(Boolean);
+  const loadError = failedResources.length ? `Could not load the ${failedResources.join(' and ')}.` : null;
 
   const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
     setError(null);
@@ -82,11 +87,11 @@ export function useWorkflowConfiguration(): WorkflowConfigurationController {
     }
   }, []);
 
-  const savePromptDraft = useCallback(async (stageId: StageId, prompt: string) => {
+  const savePromptDraft = useCallback(async (stageId: StageId, draft: CommitStageConfigurationInput) => {
     await run(async () => {
       setConfiguration(await requestJson<WorkflowConfiguration>(
         `/api/workflow-configuration/stages/${stageId}/draft`,
-        { method: 'PUT', body: JSON.stringify({ prompt }) },
+        { method: 'PUT', body: JSON.stringify(draft) },
       ));
     });
   }, [run]);
@@ -162,6 +167,11 @@ export function useWorkflowConfiguration(): WorkflowConfigurationController {
 
   return {
     configuration,
+    loadError,
+    retryLoad() {
+      if (configurationFailed) setConfigurationAttempt(attempt => attempt + 1);
+      if (catalogFailed) setCatalogAttempt(attempt => attempt + 1);
+    },
     models,
     loading,
     error,

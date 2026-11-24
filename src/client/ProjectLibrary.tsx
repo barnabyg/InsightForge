@@ -1,12 +1,15 @@
 import { useState } from 'react';
 import type { ProjectSummary } from '../shared/projects.js';
+import type { StorageUsage } from '../shared/storage.js';
 import { Modal } from './Modal.js';
 import styles from './App.module.css';
 
 interface ProjectLibraryProps {
   projects: ProjectSummary[];
+  storage: StorageUsage | null;
   loading: boolean;
   onCreate(): Promise<unknown>;
+  onImport(file: File): Promise<unknown>;
   onOpen(id: string): Promise<void>;
   onRename(id: string, name: string): Promise<void>;
   onDuplicate(id: string): Promise<void>;
@@ -27,10 +30,19 @@ function formatActivity(updatedAt: string): string {
   }).format(new Date(updatedAt));
 }
 
+function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 ** 2) return `${(bytes / 1024).toFixed(1)} KiB`;
+  if (bytes < 1024 ** 3) return `${(bytes / 1024 ** 2).toFixed(1)} MiB`;
+  return `${(bytes / 1024 ** 3).toFixed(1)} GiB`;
+}
+
 export function ProjectLibrary({
   projects,
+  storage,
   loading,
   onCreate,
+  onImport,
   onOpen,
   onRename,
   onDuplicate,
@@ -56,38 +68,46 @@ export function ProjectLibrary({
     <main className={styles['main-content']} id="projects">
       <section className={styles['library-hero']} aria-labelledby="hero-title">
         <div>
-          <p className={styles.eyebrow}>Product thinking, forged through iteration</p>
-          <h1 id="hero-title">Turn an insight into a product direction.</h1>
-          <p className={styles['hero-copy']}>
-            Shape the prompts. Run the workflow. Refine the thinking behind every artifact.
-          </p>
+          {projects.length ? <h1 id="hero-title">Projects</h1> : <>
+            <p className={styles.eyebrow}>Product thinking, forged through iteration</p>
+            <h1 id="hero-title">Turn an insight into a product direction.</h1>
+            <p className={styles['hero-copy']}>
+              Shape the prompts. Run the workflow. Refine the thinking behind every artifact.
+            </p>
+          </>}
         </div>
-        <button
-          className={styles['primary-action']}
-          type="button"
-          disabled={busy}
-          onClick={() => void perform(async () => { await onCreate(); })}
-        >
-          <span aria-hidden="true">＋</span>
-          Create project
-        </button>
+        <div className={styles['library-hero-actions']}>
+          <button
+            className={styles['primary-action']}
+            type="button"
+            disabled={busy}
+            onClick={() => void perform(async () => { await onCreate(); })}
+          >
+            <span aria-hidden="true">＋</span>
+            Create project
+          </button>
+          <label className={styles['secondary-action']} aria-disabled={busy}>
+            Import project
+            <input
+              className={styles['visually-hidden']}
+              type="file"
+              accept=".zip,application/zip"
+              aria-label="Import Project file"
+              disabled={busy}
+              onChange={(event) => {
+                const file = event.target.files?.[0];
+                if (file) void perform(async () => { await onImport(file); });
+                event.target.value = '';
+              }}
+            />
+          </label>
+        </div>
       </section>
-
-      <aside className={styles['privacy-notice']} aria-label="Privacy and OpenAI boundary">
-        <span className={styles['privacy-mark']} aria-hidden="true">◎</span>
-        <div>
-          <strong>Projects stay on this device.</strong>
-          <p>
-            When you generate, only the assembled prompt and required stage inputs are sent to OpenAI.
-          </p>
-        </div>
-      </aside>
 
       <section className={styles['project-library']} aria-labelledby="library-title">
         <div className={styles['section-heading']}>
           <div>
-            <p className={styles.eyebrow}>Project library</p>
-            <h2 id="library-title">Recent lines of thought</h2>
+            <h2 id="library-title">Recent projects</h2>
           </div>
           <span className={styles['section-meta']}>
             {projects.length} {projects.length === 1 ? 'Project' : 'Projects'} · locally saved
@@ -115,7 +135,13 @@ export function ProjectLibrary({
                 <div className={styles['project-card-topline']}>
                   <span>{String(index + 1).padStart(2, '0')}</span>
                   <span className={styles['project-status']}>
-                    {project.designBriefPresent
+                    {project.updateAvailable
+                      ? 'Update Available'
+                      : project.prdPresent
+                      ? 'PRD ready'
+                      : project.conceptScreenSetPresent
+                      ? 'Concept Screens ready'
+                      : project.designBriefPresent
                       ? 'Design Brief ready'
                       : project.insightSourcePresent
                         ? 'Insight captured'
@@ -131,8 +157,28 @@ export function ProjectLibrary({
                   <span>Open Project <span aria-hidden="true">→</span></span>
                 </button>
                 <footer className={styles['project-card-footer']}>
-                  <time dateTime={project.updatedAt}>Updated {formatActivity(project.updatedAt)}</time>
+                  <div className={styles['project-card-meta']}>
+                    <time dateTime={project.updatedAt}>Updated {formatActivity(project.updatedAt)}</time>
+                    {storage && (
+                      <span>
+                        ≈{formatBytes(storage.projects.find(({ projectId }) =>
+                          projectId === project.id)?.estimatedBytes ?? 0)} local data
+                      </span>
+                    )}
+                  </div>
                   <div className={styles['project-actions']}>
+                    <a
+                      aria-label="Back up project"
+                      href={`/api/projects/${project.id}/export`}
+                      download
+                    >Back up project</a>
+                    {project.prdPresent && (
+                      <a
+                        aria-label="Download deliverables"
+                        href={`/api/projects/${project.id}/deliverables`}
+                        download
+                      >Download deliverables</a>
+                    )}
                     <button type="button" aria-label="Rename project" onClick={() => setRename({ id: project.id, name: project.name })}>Rename</button>
                     <button type="button" aria-label="Duplicate project" disabled={busy} onClick={() => void perform(() => onDuplicate(project.id))}>Duplicate</button>
                     <button type="button" aria-label="Delete project" onClick={() => setDeleting(project)}>Delete</button>
@@ -143,6 +189,32 @@ export function ProjectLibrary({
           </div>
         )}
       </section>
+
+        <aside className={styles['privacy-notice']} aria-label="Privacy and OpenAI boundary">
+          <span className={styles['privacy-mark']} aria-hidden="true">◎</span>
+          <div>
+            <strong>Projects stay on this device.</strong>
+            <p>
+              When you generate, only the assembled prompt and required stage inputs are sent to OpenAI.
+            </p>
+          </div>
+        </aside>
+
+      <details className={styles['workspace-details']}>
+        <summary>Workspace details</summary>
+        {storage && (
+          <aside className={styles['storage-usage']} aria-label="Local storage usage">
+            <div>
+              <span>Local storage</span>
+              <strong>{formatBytes(storage.totalBytes)}</strong>
+            </div>
+            <div className={styles['storage-location']}>
+              <span>Application data</span>
+              <code title={storage.dataDirectory}>{storage.dataDirectory}</code>
+            </div>
+          </aside>
+        )}
+      </details>
 
       {rename && (
         <Modal

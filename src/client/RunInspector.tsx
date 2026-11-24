@@ -1,10 +1,12 @@
-import type { DesignBriefRun } from '../shared/generation.js';
+import type { DesignBriefRun, PrdRun } from '../shared/generation.js';
+import { runKindLabel } from './runPresentation.js';
 import styles from './App.module.css';
 
 interface RunInspectorProps {
-  run: DesignBriefRun | null;
+  run: DesignBriefRun | PrdRun | null;
   generating: boolean;
   elapsedSeconds: number;
+  stageName: 'Design Brief' | 'PRD';
 }
 
 function formatDuration(milliseconds: number | null): string {
@@ -13,7 +15,7 @@ function formatDuration(milliseconds: number | null): string {
   return `${(milliseconds / 1000).toFixed(1)} s`;
 }
 
-export function RunInspector({ run, generating, elapsedSeconds }: RunInspectorProps) {
+export function RunInspector({ run, generating, elapsedSeconds, stageName }: RunInspectorProps) {
   return (
     <aside className={styles['run-inspector']} aria-label="Run Inspector">
       <div className={styles['inspector-heading']}>
@@ -22,9 +24,9 @@ export function RunInspector({ run, generating, elapsedSeconds }: RunInspectorPr
       </div>
 
       {generating ? (
-        <div className={styles['run-progress']} role="status" aria-label="Generating Design Brief">
+        <div className={styles['run-progress']} role="status" aria-label={`Generating ${stageName}`}>
           <span className={styles['progress-spinner']} aria-hidden="true" />
-          <strong>Generating Design Brief</strong>
+          <strong>Generating {stageName}</strong>
           <span>{elapsedSeconds}s elapsed · one OpenAI text request</span>
         </div>
       ) : run ? (
@@ -34,54 +36,76 @@ export function RunInspector({ run, generating, elapsedSeconds }: RunInspectorPr
             {run.status === 'succeeded' ? 'Succeeded' : run.status === 'failed' ? 'Failed' : 'Running'}
           </div>
 
-          <dl className={styles['inspector-facts']}>
-            <div><dt>Model</dt><dd>{run.model}</dd></div>
-            <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
-            <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString('en-GB')}</time></dd></div>
-            {run.validation && (
-              <div><dt>Validation</dt><dd>{run.validation.wordCount} words · {run.validation.status === 'valid' ? 'Valid' : 'Warning'}</dd></div>
+          <details key={`${run.id}-${run.status}`}
+            className={styles['run-details']}
+            open={run.status === 'failed' || Boolean(run.validation?.warnings.length)}>
+            <summary>{run.model} · Run details{run.validation?.warnings.length
+              ? ` · ${run.validation.warnings.length} warning(s)` : ''}</summary>
+            <dl className={styles['inspector-facts']}>
+              <div><dt>Run type</dt><dd>{runKindLabel(run.runKind)}</dd></div>
+              <div><dt>Model</dt><dd>{run.model}</dd></div>
+              <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
+              <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString('en-GB')}</time></dd></div>
+              {run.stageId === 'prd' && (
+                <>
+                  <div><dt>Design Brief input</dt><dd><code>{run.stageInput.designBrief.artifactId}</code></dd></div>
+                  <div><dt>Design Brief run</dt><dd><code>{run.stageInput.designBrief.runId}</code></dd></div>
+                  <div><dt>Visual inputs</dt><dd>{run.stageInput.conceptScreenSet.screens.length} Concept Screens</dd></div>
+                  <div><dt>Concept Screen Set</dt><dd><code>{run.stageInput.conceptScreenSet.artifactId}</code></dd></div>
+                  <div><dt>Concept Screen Set run</dt><dd><code>{run.stageInput.conceptScreenSet.runId}</code></dd></div>
+                  {run.stageInput.conceptScreenSet.screens.map((screen) => (
+                    <div key={screen.assetId}>
+                      <dt>Screen {screen.ordinal} asset</dt>
+                      <dd><code>{screen.assetId}</code></dd>
+                    </div>
+                  ))}
+                </>
+              )}
+              {run.validation && (
+                <div><dt>Validation</dt><dd>{run.validation.wordCount} words · {run.validation.status === 'valid' ? 'Valid' : 'Warning'}</dd></div>
+              )}
+            </dl>
+
+            {run.usage && (
+              <section className={styles['inspector-section']} aria-label="Token usage">
+                <h3>Usage</h3>
+                <dl className={styles['usage-grid']}>
+                  <div><dt>Input tokens</dt><dd>{run.usage.inputTokens}</dd></div>
+                  <div><dt>Output tokens</dt><dd>{run.usage.outputTokens}</dd></div>
+                  <div><dt>Total</dt><dd>{run.usage.totalTokens}</dd></div>
+                </dl>
+              </section>
             )}
-          </dl>
 
-          {run.usage && (
-            <section className={styles['inspector-section']} aria-label="Token usage">
-              <h3>Usage</h3>
-              <dl className={styles['usage-grid']}>
-                <div><dt>Input tokens</dt><dd>{run.usage.inputTokens}</dd></div>
-                <div><dt>Output tokens</dt><dd>{run.usage.outputTokens}</dd></div>
-                <div><dt>Total</dt><dd>{run.usage.totalTokens}</dd></div>
-              </dl>
-            </section>
-          )}
+            {run.validation?.warnings.map((warning) => (
+              <div className={styles['sanity-warning']} key={warning.code}>
+                <strong>Sanity Warning</strong>
+                <span>{warning.message}</span>
+              </div>
+            ))}
 
-          {run.validation?.warnings.map((warning) => (
-            <div className={styles['sanity-warning']} key={warning.code}>
-              <strong>Sanity Warning</strong>
-              <span>{warning.message}</span>
+            {run.error && (
+              <div className={styles['run-error']} role="alert">
+                <strong>{run.error.code}</strong>
+                <span>{run.error.message}</span>
+              </div>
+            )}
+
+            <details className={styles['inspector-details']}>
+              <summary>Assembled request</summary>
+              <pre>{run.assembledRequest}</pre>
+            </details>
+            <details className={styles['inspector-details']}>
+              <summary>Prompt snapshot</summary>
+              <pre>{run.stagePrompt}</pre>
+            </details>
+            <div className={styles['request-identifiers']}>
+              <span>Request ID</span>
+              <code>{run.requestId ?? 'Not reported'}</code>
+              <span>Response ID</span>
+              <code>{run.responseId ?? 'Not reported'}</code>
             </div>
-          ))}
-
-          {run.error && (
-            <div className={styles['run-error']} role="alert">
-              <strong>{run.error.code}</strong>
-              <span>{run.error.message}</span>
-            </div>
-          )}
-
-          <details className={styles['inspector-details']}>
-            <summary>Assembled request</summary>
-            <pre>{run.assembledRequest}</pre>
           </details>
-          <details className={styles['inspector-details']}>
-            <summary>Prompt snapshot</summary>
-            <pre>{run.stagePrompt}</pre>
-          </details>
-          <div className={styles['request-identifiers']}>
-            <span>Request ID</span>
-            <code>{run.requestId ?? 'Not reported'}</code>
-            <span>Response ID</span>
-            <code>{run.responseId ?? 'Not reported'}</code>
-          </div>
         </>
       ) : (
         <p className={styles['inspector-empty']}>

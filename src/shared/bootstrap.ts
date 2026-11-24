@@ -1,3 +1,5 @@
+import type { StorageUsage } from './storage.js';
+
 export type ApplicationMode = 'live' | 'mock';
 
 export type ConnectivityStatus =
@@ -22,5 +24,5 @@ export interface BootstrapResponse {
   app: { name: string; version: string };
   mode: ApplicationMode;
   connectivity: ConnectivityState;
-  storage: { state: 'ready' };
+  storage: StorageUsage;
 }

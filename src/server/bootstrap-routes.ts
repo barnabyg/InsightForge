@@ -5,11 +5,11 @@ import type {
 } from '../shared/bootstrap.js';
 import type { ConnectivityMonitor } from './connectivity-monitor.js';
 import { applicationMetadata } from './app-metadata.js';
-import type { StorageState } from './storage.js';
+import type { StorageUsage } from '../shared/storage.js';
 
 export interface BootstrapRouteOptions {
   mode: ApplicationMode;
-  storage: StorageState;
+  readStorage(): Promise<StorageUsage>;
   connectivity: ConnectivityMonitor;
 }
 export function registerBootstrapRoutes(
@@ -20,9 +20,10 @@ export function registerBootstrapRoutes(
     app: applicationMetadata,
     mode: options.mode,
     connectivity: options.connectivity.current(),
-    storage: options.storage,
+    storage: await options.readStorage(),
   }));
 
+  app.get('/api/storage', async () => options.readStorage());
   app.get('/api/connectivity', async () => options.connectivity.waitForResult());
   app.post('/api/connectivity/refresh', async () => options.connectivity.refresh());
 }

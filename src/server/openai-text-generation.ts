@@ -1,11 +1,12 @@
 import OpenAI from 'openai';
 import type {
   DesignBriefGenerationResult,
+  PrdGenerationResult,
   TextGenerationBoundary,
 } from '../shared/generation.js';
 import { GenerationBoundaryError } from './generation-boundary.js';
 
-const designBriefSchema = {
+const markdownArtifactSchema = {
   type: 'object' as const,
   properties: {
     markdown: { type: 'string' as const, minLength: 1 },
@@ -14,7 +15,8 @@ const designBriefSchema = {
   additionalProperties: false,
 };
 
-function parseDesignBriefResponse(response: {
+function parseMarkdownArtifactResponse(
+  response: {
   id: string;
   _request_id?: string | null;
   status?: string;
@@ -31,28 +33,30 @@ function parseDesignBriefResponse(response: {
     output_tokens: number;
     total_tokens: number;
   } | null;
-}): DesignBriefGenerationResult {
+  },
+  artifactName: 'Design Brief' | 'PRD',
+): DesignBriefGenerationResult | PrdGenerationResult {
   const content = response.output
     .find(({ type }) => type === 'message')
     ?.content?.[0];
   if (content?.type === 'refusal') {
     throw new GenerationBoundaryError(
       'openai_refusal',
-      'OpenAI declined to generate this Design Brief.',
+      `OpenAI declined to generate this ${artifactName}.`,
       { requestId: response._request_id ?? undefined, responseId: response.id },
     );
   }
   if (response.status !== 'completed') {
     throw new GenerationBoundaryError(
       'openai_incomplete',
-      'OpenAI did not complete the Design Brief response.',
+      `OpenAI did not complete the ${artifactName} response.`,
       { requestId: response._request_id ?? undefined, responseId: response.id },
     );
   }
   if (content?.type !== 'output_text' || typeof content.text !== 'string') {
     throw new GenerationBoundaryError(
       'invalid_structured_output',
-      'OpenAI returned no structured Design Brief.',
+      `OpenAI returned no structured ${artifactName}.`,
       { requestId: response._request_id ?? undefined, responseId: response.id },
     );
   }
@@ -62,7 +66,7 @@ function parseDesignBriefResponse(response: {
   } catch {
     throw new GenerationBoundaryError(
       'invalid_structured_output',
-      'OpenAI returned an unreadable structured Design Brief.',
+      `OpenAI returned an unreadable structured ${artifactName}.`,
       { requestId: response._request_id ?? undefined, responseId: response.id },
     );
   }
@@ -74,7 +78,7 @@ function parseDesignBriefResponse(response: {
   ) {
     throw new GenerationBoundaryError(
       'invalid_structured_output',
-      'OpenAI returned an invalid structured Design Brief.',
+      `OpenAI returned an invalid structured ${artifactName}.`,
       { requestId: response._request_id ?? undefined, responseId: response.id },
     );
   }
@@ -126,7 +130,7 @@ export function createOpenAITextGeneration(apiKey: string): TextGenerationBounda
               type: 'json_schema',
               name: 'design_brief_artifact',
               strict: true,
-              schema: designBriefSchema,
+              schema: markdownArtifactSchema,
             },
           },
         });
@@ -143,7 +147,63 @@ export function createOpenAITextGeneration(apiKey: string): TextGenerationBounda
           { requestId },
         );
       }
-      return parseDesignBriefResponse(response);
+      return parseMarkdownArtifactResponse(response, 'Design Brief');
+    },
+
+    async generatePrd(input) {
+      let response;
+      try {
+        response = await client.responses.create({
+          model: input.model,
+          input: [
+            {
+              role: 'developer',
+              content: [{ type: 'input_text', text: input.stagePrompt }],
+            },
+            {
+              role: 'user',
+              content: [
+                {
+                  type: 'input_text',
+                  text: `Stage Input — Design Brief:\n${input.designBrief}\n\nStage Input — Concept Screen Set:`,
+                },
+                ...input.conceptScreens.flatMap((screen) => ([
+                  {
+                    type: 'input_text' as const,
+                    text: `Concept Screen ${screen.ordinal}:`,
+                  },
+                  {
+                    type: 'input_image' as const,
+                    image_url: `data:image/png;base64,${Buffer.from(screen.png).toString('base64')}`,
+                    detail: 'high' as const,
+                  },
+                ])),
+              ],
+            },
+          ],
+          text: {
+            format: {
+              type: 'json_schema',
+              name: 'prd_artifact',
+              strict: true,
+              schema: markdownArtifactSchema,
+            },
+          },
+        });
+      } catch (error) {
+        const requestId = typeof error === 'object'
+          && error !== null
+          && 'request_id' in error
+          && typeof error.request_id === 'string'
+          ? error.request_id
+          : undefined;
+        throw new GenerationBoundaryError(
+          'openai_request_failed',
+          'OpenAI could not generate the PRD.',
+          { requestId },
+        );
+      }
+      return parseMarkdownArtifactResponse(response, 'PRD');
     },
   };
 }

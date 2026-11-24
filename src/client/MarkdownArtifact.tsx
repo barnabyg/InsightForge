@@ -1,9 +1,9 @@
-import { useMemo, useState } from 'react';
-import type { DesignBriefArtifact } from '../shared/generation.js';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import type { DesignBriefArtifact, PrdArtifact } from '../shared/generation.js';
 import styles from './App.module.css';
 
 interface MarkdownArtifactProps {
-  artifact: DesignBriefArtifact;
+  artifact: DesignBriefArtifact | PrdArtifact;
   projectName: string;
 }
 
@@ -35,26 +35,57 @@ function markdownBlocks(markdown: string): MarkdownBlock[] {
 }
 
 export function MarkdownArtifact({ artifact, projectName }: MarkdownArtifactProps) {
+  const artifactName = artifact.stageId === 'prd' ? 'PRD' : 'Design Brief';
+  const searchName = artifact.stageId === 'prd' ? 'PRD' : 'Design Brief';
+  const fileSuffix = artifact.stageId === 'prd' ? 'prd' : 'design-brief';
   const [raw, setRaw] = useState(false);
   const [query, setQuery] = useState('');
   const blocks = useMemo(() => markdownBlocks(artifact.markdown), [artifact.markdown]);
-  const matches = query.trim()
-    ? artifact.markdown.toLocaleLowerCase('en-GB')
-      .split(query.trim().toLocaleLowerCase('en-GB')).length - 1
-    : 0;
+  const [activeMatch, setActiveMatch] = useState(0);
+  const documentRef = useRef<HTMLElement>(null);
+  const term = query.trim();
+  const pattern = term ? new RegExp(`(${term.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')})`, 'giu') : null;
+  let matches = 0;
+  function highlight(text: string) {
+    if (!pattern) return text;
+    return text.split(pattern).map((part, index) => {
+      if (index % 2 === 0) return part;
+      const ordinal = matches++;
+      return <mark key={index} aria-current={ordinal === activeMatch ? 'true' : undefined}>{part}</mark>;
+    });
+  }
+
+  const content = raw ? highlight(artifact.markdown) : blocks.map((block, index) => {
+    if (block.type === 'heading') {
+      const Heading = block.level === 1 ? 'h2' : 'h3';
+      return <Heading key={index}>{highlight(block.text)}</Heading>;
+    }
+    if (block.type === 'list') {
+      return <ul key={index}>{block.items.map((item, i) => <li key={i}>{highlight(item)}</li>)}</ul>;
+    }
+    return <p key={index}>{highlight(block.text)}</p>;
+  });
+
+  useEffect(() => {
+    documentRef.current?.querySelector('mark[aria-current]')?.scrollIntoView({ block: 'center' });
+  }, [term, activeMatch, raw, artifact.id]);
+
+  function moveMatch(direction: number) {
+    if (matches) setActiveMatch(current => (current + direction + matches) % matches);
+  }
 
   function downloadMarkdown() {
     const blob = new Blob([artifact.markdown], { type: 'text/markdown;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
-    anchor.download = `${projectName.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'project'}-design-brief.md`;
+    anchor.download = `${projectName.replace(/[^a-z0-9]+/gi, '-').replace(/^-|-$/g, '').toLowerCase() || 'project'}-${fileSuffix}.md`;
     anchor.click();
     URL.revokeObjectURL(url);
   }
 
   return (
-    <article className={styles['markdown-artifact']} aria-label="Design Brief Artifact">
+    <article ref={documentRef} className={styles['markdown-artifact']} aria-label={`${artifactName} Artifact`}>
       <header className={styles['artifact-toolbar']}>
         <div>
           <span className={styles['readonly-badge']}>Read-only Artifact</span>
@@ -62,17 +93,27 @@ export function MarkdownArtifact({ artifact, projectName }: MarkdownArtifactProp
         </div>
         <div className={styles['artifact-tools']}>
           <label>
-            <span className={styles['visually-hidden']}>Search Design Brief</span>
+            <span className={styles['visually-hidden']}>Search {searchName}</span>
             <input
               type="search"
               value={query}
-              placeholder="Find in brief"
-              aria-label="Search Design Brief"
-              onChange={(event) => setQuery(event.target.value)}
+              placeholder={artifact.stageId === 'prd' ? 'Find in PRD' : 'Find in brief'}
+              aria-label={`Search ${searchName}`}
+              onChange={event => { setQuery(event.target.value); setActiveMatch(0); }}
+              onKeyDown={event => {
+                if (event.key === 'Enter') {
+                  event.preventDefault();
+                  moveMatch(event.shiftKey ? -1 : 1);
+                }
+              }}
             />
           </label>
-          {query && <span className={styles['match-count']}>{matches} matches</span>}
-          <button type="button" onClick={() => setRaw((current) => !current)}>
+          {term && <>
+            <span className={styles['match-count']} role="status">{matches ? `${activeMatch + 1} of ${matches}` : 'No matches'}</span>
+            <button type="button" disabled={!matches} onClick={() => moveMatch(-1)}>Previous match</button>
+            <button type="button" disabled={!matches} onClick={() => moveMatch(1)}>Next match</button>
+          </>}
+          <button type="button" onClick={() => { setRaw(current => !current); setActiveMatch(0); }}>
             {raw ? 'Rendered' : 'Raw'}
           </button>
           <button type="button" onClick={() => void navigator.clipboard.writeText(artifact.markdown)}>
@@ -82,22 +123,8 @@ export function MarkdownArtifact({ artifact, projectName }: MarkdownArtifactProp
         </div>
       </header>
 
-      {raw ? (
-        <pre className={styles['artifact-raw']}>{artifact.markdown}</pre>
-      ) : (
-        <div className={styles['artifact-document']}>
-          {blocks.map((block, index) => {
-            if (block.type === 'heading') {
-              if (block.level === 1) return <h2 key={index}>{block.text}</h2>;
-              return <h3 key={index}>{block.text}</h3>;
-            }
-            if (block.type === 'list') {
-              return <ul key={index}>{block.items.map((item) => <li key={item}>{item}</li>)}</ul>;
-            }
-            return <p key={index}>{block.text}</p>;
-          })}
-        </div>
-      )}
+      {raw ? <pre className={styles['artifact-raw']}>{content}</pre>
+        : <div className={styles['artifact-document']}>{content}</div>}
     </article>
   );
 }

@@ -46,6 +46,15 @@ describe('Workflow Configuration HTTP API', () => {
     expect(drafted.json().stages[0].prompt).not
       .toBe('Prioritise behavioural evidence and explicit assumptions.');
 
+    const imageDraft = '/api/workflow-configuration/stages/concept_screens/draft';
+    await app.inject({ method: 'PUT', url: imageDraft,
+      payload: { prompt: 'Layout', model: 'gpt-image-2', imageQuality: 'high' } });
+    const legacy = await app.inject({ method: 'PUT', url: imageDraft,
+      payload: { prompt: 'Updated layout' } });
+    expect(legacy.json().stages[1].draftPrompt).toMatchObject({
+      prompt: 'Updated layout', model: 'gpt-image-2', imageQuality: 'high',
+    });
+
     const saved = await app.inject({
       method: 'POST',
       url: '/api/workflow-configuration/stages/design_brief/save',
@@ -67,6 +76,7 @@ describe('Workflow Configuration HTTP API', () => {
     expect(models.statusCode).toBe(200);
     expect(models.json()).toEqual({
       text: ['gpt-5.6-luna'],
+      multimodalText: ['gpt-5.6-luna'],
       image: ['gpt-image-2'],
       source: 'mock',
       checkedAt: '2026-07-16T16:00:00.000Z',

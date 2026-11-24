@@ -59,6 +59,13 @@ test('Author safely improves and restores the shared workflow configuration', as
 
   await page.getByRole('tab', { name: 'Concept Screens' }).click();
   await page.getByLabel('Image quality').selectOption('high');
+  await expect(page.getByText(/Unpublished changes/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Design Brief' }).click();
+  await page.getByRole('tab', { name: 'Concept Screens' }).click();
+  await expect(page.getByLabel('Image quality')).toHaveValue('high');
+  await page.reload();
+  await page.getByRole('tab', { name: 'Concept Screens' }).click();
+  await expect(page.getByLabel('Image quality')).toHaveValue('high');
   await page.getByRole('button', { name: 'Save globally' }).click();
   await expect(page.getByLabel('Image quality')).toHaveValue('high');
 
@@ -111,4 +118,37 @@ test('Author safely improves and restores the shared workflow configuration', as
   await expect(resetDialog).toContainText('Low → Medium');
   await resetDialog.getByRole('button', { name: 'Reset workflow' }).click();
   await expect(designPrompt).toHaveValue(/experienced product designer/);
+});
+
+test('PRD prompt editing returns to the originating project stage', async ({ page }) => {
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Create project' }).click();
+  await page.getByRole('button', { name: /04.*PRD/ }).click();
+  await page.getByRole('link', { name: 'Edit PRD prompt' }).click();
+  await expect(page.getByRole('tab', { name: /PRD/ })).toHaveAttribute('aria-selected', 'true');
+  await page.goBack();
+  await expect(page.getByRole('heading', { name: 'PRD', exact: true })).toBeVisible();
+  await page.getByRole('link', { name: 'Edit PRD prompt' }).click();
+  await page.getByRole('link', { name: 'Return to PRD' }).click();
+  await expect(page.getByRole('heading', { name: 'PRD', exact: true })).toBeVisible();
+});
+
+test('catalog failure preserves saved settings and offers recovery', async ({ page }) => {
+  await page.request.put('/api/workflow-configuration/stages/design_brief/draft', {
+    data: { prompt: 'Recovered instructions', model: 'gpt-5.4-mini', imageQuality: null },
+  });
+  await page.route('**/api/models', route => route.fulfill({ status: 503, body: '{}' }));
+  await page.goto('/?view=prompts');
+  await expect(page.getByRole('alert')).toContainText('model catalog');
+  await expect(page.getByRole('textbox', { name: 'Design Brief Stage Prompt' })).toBeVisible();
+  await expect(page.getByLabel('Model for Design Brief')).toHaveValue('gpt-5.4-mini');
+  const first = page.getByRole('tab', { name: /Design Brief/ });
+  await first.focus();
+  await first.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: /Concept Screens/ })).toBeFocused();
+  await expect(page.getByRole('tabpanel')).toHaveAccessibleName(/Concept Screens/);
+  await page.unroute('**/api/models');
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByText('Mock model catalog')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
 });

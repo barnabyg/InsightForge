@@ -6,11 +6,15 @@ test('Author understands the local and OpenAI boundary when the app launches', a
   await page.goto('/');
 
   await expect(
-    page.getByRole('heading', { name: 'Turn an insight into a product direction.' }),
+    page.getByRole('heading', { name: /^(Projects|Turn an insight into a product direction\.)$/ }),
   ).toBeVisible();
   await expect(page.getByText('Mock mode')).toBeVisible();
   await expect(page.getByRole('status', { name: 'OpenAI connected' })).toBeVisible();
   await expect(page.getByText('Projects stay on this device.')).toBeVisible();
+  await page.getByText('Workspace details', { exact: true }).click();
+  await expect(page.getByLabel('Local storage usage')).toContainText('Local storage');
+  await expect(page.getByLabel('Local storage usage')).toContainText('Application data');
+  await expect(page.getByLabel('Local storage usage').locator('code')).toHaveText(/.+/);
   await expect(
     page.getByText(
       'When you generate, only the assembled prompt and required stage inputs are sent to OpenAI.',

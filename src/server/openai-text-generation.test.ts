@@ -97,6 +97,101 @@ describe('OpenAI text generation adapter', () => {
     });
   });
 
+  it('assembles a strict PRD request from the Design Brief and exactly three labelled PNG inputs', async () => {
+    openAI.create.mockResolvedValue({
+      id: 'resp_prd_01',
+      _request_id: 'req_prd_01',
+      status: 'completed',
+      output: [{
+        type: 'message',
+        content: [{
+          type: 'output_text',
+          text: JSON.stringify({
+            markdown: '# PRD\n\n## Functional requirements\n\nFR-001 presents a comparison.',
+          }),
+        }],
+      }],
+      usage: {
+        input_tokens: 820,
+        output_tokens: 210,
+        total_tokens: 1030,
+      },
+    });
+    const adapter = createOpenAITextGeneration('test-key');
+
+    const result = await adapter.generatePrd({
+      model: 'gpt-5.6-luna',
+      stagePrompt: 'Create a rigorous PRD in Markdown.',
+      designBrief: '# Design Brief\n\nCompare retrofit proposals.',
+      conceptScreens: [
+        { ordinal: 1, png: Buffer.from('screen-one') },
+        { ordinal: 2, png: Buffer.from('screen-two') },
+        { ordinal: 3, png: Buffer.from('screen-three') },
+      ],
+    });
+
+    expect(openAI.create).toHaveBeenCalledWith({
+      model: 'gpt-5.6-luna',
+      input: [
+        {
+          role: 'developer',
+          content: [{
+            type: 'input_text',
+            text: 'Create a rigorous PRD in Markdown.',
+          }],
+        },
+        {
+          role: 'user',
+          content: [
+            {
+              type: 'input_text',
+              text: 'Stage Input — Design Brief:\n# Design Brief\n\nCompare retrofit proposals.\n\nStage Input — Concept Screen Set:',
+            },
+            { type: 'input_text', text: 'Concept Screen 1:' },
+            {
+              type: 'input_image',
+              image_url: `data:image/png;base64,${Buffer.from('screen-one').toString('base64')}`,
+              detail: 'high',
+            },
+            { type: 'input_text', text: 'Concept Screen 2:' },
+            {
+              type: 'input_image',
+              image_url: `data:image/png;base64,${Buffer.from('screen-two').toString('base64')}`,
+              detail: 'high',
+            },
+            { type: 'input_text', text: 'Concept Screen 3:' },
+            {
+              type: 'input_image',
+              image_url: `data:image/png;base64,${Buffer.from('screen-three').toString('base64')}`,
+              detail: 'high',
+            },
+          ],
+        },
+      ],
+      text: {
+        format: {
+          type: 'json_schema',
+          name: 'prd_artifact',
+          strict: true,
+          schema: {
+            type: 'object',
+            properties: {
+              markdown: { type: 'string', minLength: 1 },
+            },
+            required: ['markdown'],
+            additionalProperties: false,
+          },
+        },
+      },
+    });
+    expect(result).toEqual({
+      markdown: '# PRD\n\n## Functional requirements\n\nFR-001 presents a comparison.',
+      responseId: 'resp_prd_01',
+      requestId: 'req_prd_01',
+      usage: { inputTokens: 820, outputTokens: 210, totalTokens: 1030 },
+    });
+  });
+
   it('normalizes SDK failures without exposing credentials or raw provider details', async () => {
     openAI.create.mockRejectedValue(Object.assign(
       new Error('Authorization failed for sk-secret-value'),

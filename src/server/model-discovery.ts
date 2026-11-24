@@ -2,6 +2,7 @@ import OpenAI from 'openai';
 
 export interface CompatibleModels {
   text: string[];
+  multimodalText: string[];
   image: string[];
 }
 
@@ -24,6 +25,13 @@ export function isCompatibleTextModel(modelId: string): boolean {
     && !incompatibleTextMarkers.some((marker) => lower.includes(marker));
 }
 
+export function isCompatibleMultimodalTextModel(modelId: string): boolean {
+  const lower = modelId.toLowerCase();
+  return isCompatibleTextModel(modelId)
+    && !/^o1-(?:mini|preview)(?:-|$)/.test(lower)
+    && !/^o3-mini(?:-|$)/.test(lower);
+}
+
 export function isCompatibleImageModel(modelId: string): boolean {
   return /^gpt-image-(?:\d|latest)/.test(modelId.toLowerCase());
 }
@@ -32,6 +40,7 @@ export function filterCompatibleModels(modelIds: string[]): CompatibleModels {
   const unique = [...new Set(modelIds)];
   return {
     text: unique.filter(isCompatibleTextModel).sort(),
+    multimodalText: unique.filter(isCompatibleMultimodalTextModel).sort(),
     image: unique.filter(isCompatibleImageModel).sort(),
   };
 }

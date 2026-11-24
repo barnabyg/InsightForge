@@ -37,7 +37,7 @@ describe('local application bootstrap', () => {
     });
 
     expect(bootstrap.statusCode).toBe(200);
-    expect(bootstrap.json()).toEqual({
+    expect(bootstrap.json()).toMatchObject({
       app: { name: 'InsightForge', version: '0.1.0' },
       mode: 'mock',
       connectivity: {
@@ -45,7 +45,12 @@ describe('local application bootstrap', () => {
         checkedAt: '2026-07-16T09:30:00.000Z',
         message: 'Mock OpenAI is ready',
       },
-      storage: { state: 'ready' },
+      storage: {
+        state: 'ready',
+        dataDirectory,
+        assetBytes: 0,
+        projects: [],
+      },
     });
     expect(JSON.stringify(bootstrap.json())).not.toContain('apiKey');
 
@@ -95,21 +100,48 @@ describe('local application bootstrap', () => {
     await app.close();
   });
 
+  it('reports live local storage consumption and its application-data location', async () => {
+    const dataDirectory = await createTemporaryDataDirectory();
+    const app = await buildApp({ dataDirectory, mode: 'mock' });
+
+    const response = await app.inject({
+      method: 'GET',
+      url: '/api/storage',
+      headers: { host: 'localhost:4317' },
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      state: 'ready',
+      dataDirectory,
+      assetBytes: 0,
+      projects: [],
+    });
+    expect(response.json().databaseBytes).toBeGreaterThan(0);
+    expect(response.json().totalBytes).toBe(response.json().databaseBytes);
+    expect(response.json().availableBytes).toBeGreaterThan(0);
+
+    const bootstrap = await app.inject({
+      method: 'GET',
+      url: '/api/bootstrap',
+      headers: { host: 'localhost:4317' },
+    });
+    // Free space is sampled separately for each request and can change between reads.
+    expect(bootstrap.json().storage).toEqual({ ...response.json(), availableBytes: expect.any(Number) });
+    expect(bootstrap.json().storage.availableBytes).toBeGreaterThan(0);
+
+    await app.close();
+  });
+
   it('starts on a real loopback listener while a live connectivity check runs in the background', async () => {
     const dataDirectory = await createTemporaryDataDirectory();
 
-    const appResult = await Promise.race([
-      buildApp({
-        dataDirectory,
-        mode: 'live',
-        apiKey: 'test-key',
-        checkOpenAI: () => new Promise(() => undefined),
-      }),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
-    ]);
-
-    expect(appResult).not.toBeNull();
-    const app = appResult!;
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'live',
+      apiKey: 'test-key',
+      checkOpenAI: () => new Promise(() => undefined),
+    });
     const address = await app.listen({ host: '127.0.0.1', port: 0 });
     const response = await fetch(`${address}/api/bootstrap`);
 

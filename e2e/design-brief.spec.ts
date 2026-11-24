@@ -57,6 +57,8 @@ test('Author generates and inspects a persisted read-only Design Brief', async (
     .toHaveAttribute('readonly', '');
   await expect(page.getByText('Insight Source is locked after generation'))
     .toBeVisible();
+  await expect(page.getByRole('button', { name: 'Begin Insight Revision' }))
+    .toBeVisible();
   await page.getByRole('link', { name: 'All projects' }).click();
   await expect(page.getByRole('article').filter({
     hasText: 'Homeowners cannot compare energy retrofit proposals',

@@ -4,6 +4,7 @@ import type { ApplicationMode } from '../shared/bootstrap.js';
 import type { ModelCatalog } from '../shared/workflow-configuration.js';
 import {
   discoverCompatibleModels,
+  isCompatibleMultimodalTextModel,
   type CompatibleModels,
 } from './model-discovery.js';
 import { initializeStorage } from './storage.js';
@@ -27,12 +28,14 @@ export interface ModelCatalogService {
 }
 
 function defaultModels(): CompatibleModels {
+  const text = [...new Set(
+    defaultStageConfigurations
+      .filter(({ kind }) => kind === 'text')
+      .map(({ model }) => model),
+  )];
   return {
-    text: [...new Set(
-      defaultStageConfigurations
-        .filter(({ kind }) => kind === 'text')
-        .map(({ model }) => model),
-    )],
+    text,
+    multimodalText: text.filter(isCompatibleMultimodalTextModel),
     image: [...new Set(
       defaultStageConfigurations
         .filter(({ kind }) => kind === 'image')
@@ -48,6 +51,8 @@ function parseCache(row: CacheRow | undefined): ModelCatalog | null {
     if (
       !Array.isArray(parsed.text)
       || !parsed.text.every((id) => typeof id === 'string')
+      || !Array.isArray(parsed.multimodalText)
+      || !parsed.multimodalText.every((id) => typeof id === 'string')
       || !Array.isArray(parsed.image)
       || !parsed.image.every((id) => typeof id === 'string')
     ) {

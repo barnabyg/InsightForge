@@ -7,6 +7,8 @@ export type StageInputId =
 export type ImageQuality = 'low' | 'medium' | 'high';
 
 export interface PromptDraft {
+  model?: string;
+  imageQuality?: ImageQuality | null;
   prompt: string;
   updatedAt: string;
 }
@@ -53,6 +55,7 @@ export interface WorkflowConfigurationExport {
 
 export interface ModelCatalog {
   text: string[];
+  multimodalText: string[];
   image: string[];
   source: 'live' | 'cache' | 'defaults' | 'mock';
   checkedAt: string;

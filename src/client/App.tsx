@@ -12,7 +12,12 @@ function classes(...names: string[]): string {
 }
 
 export function App() {
-  const { shell, refreshConnectivity, refreshing } = useBootstrap();
+  const {
+    shell,
+    refreshConnectivity,
+    refreshStorage,
+    refreshing,
+  } = useBootstrap();
   const projects = useProjects();
   const [view, setView] = useState<'projects' | 'prompts'>(() =>
     new URLSearchParams(window.location.search).get('view') === 'prompts'
@@ -29,8 +34,15 @@ export function App() {
     return () => window.removeEventListener('popstate', followViewHistory);
   }, []);
 
+  useEffect(() => {
+    if (!projects.currentProject) void refreshStorage();
+  }, [projects.currentProject, projects.projects, refreshStorage]);
+
   function showView(nextView: 'projects' | 'prompts') {
     setView(nextView);
+    if (nextView === 'projects') {
+      void projects.refreshLibrary();
+    }
     window.history.pushState(
       {},
       '',
@@ -65,6 +77,7 @@ export function App() {
           onShowLibrary={projects.showLibrary}
           onSaveInsight={(insightSource) =>
             projects.updateInsightSource(projects.currentProject!.id, insightSource)}
+          onRevisionPromoted={projects.refreshCurrentProject}
         />
       ) : (
         <div className={classes('workspace')}>
@@ -103,8 +116,10 @@ export function App() {
 
           {view === 'projects' ? <ProjectLibrary
             projects={projects.projects}
+            storage={shell.storage}
             loading={projects.loading}
             onCreate={() => projects.createProject()}
+            onImport={projects.importProject}
             onOpen={projects.openProject}
             onRename={projects.renameProject}
             onDuplicate={projects.duplicateProject}

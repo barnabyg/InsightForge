@@ -25,7 +25,10 @@ export interface ProjectsController {
   loading: boolean;
   error: string | null;
   createProject(input?: CreateProjectInput): Promise<Project>;
+  importProject(file: File): Promise<Project>;
   openProject(id: string): Promise<void>;
+  refreshCurrentProject(): Promise<Project>;
+  refreshLibrary(): Promise<void>;
   showLibrary(): void;
   updateInsightSource(id: string, insightSource: string): Promise<Project>;
   renameProject(id: string, name: string): Promise<void>;
@@ -127,6 +130,7 @@ export function useProjects(): ProjectsController {
     currentProject,
     loading,
     error,
+    refreshLibrary,
 
     async createProject(input = {}) {
       return run(async () => {
@@ -141,8 +145,32 @@ export function useProjects(): ProjectsController {
       });
     },
 
+    async importProject(file) {
+      return run(async () => {
+        const project = await requestJson<Project>('/api/project-imports', {
+          method: 'POST',
+          headers: { 'content-type': 'application/zip' },
+          body: file,
+        });
+        await refreshLibrary();
+        return project;
+      });
+    },
+
     async openProject(id) {
       await run(() => loadProject(id, true));
+    },
+
+    async refreshCurrentProject() {
+      if (!currentProject) {
+        throw new Error('No Project is open.');
+      }
+      return run(async () => {
+        const project = await requestJson<Project>(`/api/projects/${currentProject.id}`);
+        setCurrentProject(project);
+        await refreshLibrary();
+        return project;
+      });
     },
 
     showLibrary() {

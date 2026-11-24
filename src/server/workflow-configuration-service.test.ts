@@ -231,6 +231,16 @@ describe('Workflow Configuration service', () => {
       prompt: 'A valid PRD prompt',
       model: 'gpt-audio-1.5',
       imageQuality: null,
-    })).toThrow('PRD requires a compatible text model');
+    })).toThrow('PRD requires a compatible multimodal text model');
+    expect(() => service.commitStageConfiguration('prd', {
+      prompt: 'A valid PRD prompt',
+      model: 'o3-mini',
+      imageQuality: null,
+    })).toThrow('PRD requires a compatible multimodal text model');
+    expect(() => service.commitStageConfiguration('design_brief', {
+      prompt: 'A valid Design Brief prompt',
+      model: 'o3-mini',
+      imageQuality: null,
+    })).not.toThrow();
   });
 });

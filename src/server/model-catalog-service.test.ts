@@ -34,12 +34,14 @@ describe('Model Catalog service', () => {
       now: () => new Date('2026-07-16T15:30:00.000Z'),
       discoverModels: async () => ({
         text: ['gpt-5.4-mini', 'gpt-5.6-luna'],
+        multimodalText: ['gpt-5.4-mini', 'gpt-5.6-luna'],
         image: ['gpt-image-2'],
       }),
     });
     services.push(live);
     expect(await live.getModelCatalog()).toEqual({
       text: ['gpt-5.4-mini', 'gpt-5.6-luna'],
+      multimodalText: ['gpt-5.4-mini', 'gpt-5.6-luna'],
       image: ['gpt-image-2'],
       source: 'live',
       checkedAt: '2026-07-16T15:30:00.000Z',
@@ -56,6 +58,7 @@ describe('Model Catalog service', () => {
     services.push(cached);
     expect(await cached.getModelCatalog()).toEqual({
       text: ['gpt-5.4-mini', 'gpt-5.6-luna'],
+      multimodalText: ['gpt-5.4-mini', 'gpt-5.6-luna'],
       image: ['gpt-image-2'],
       source: 'cache',
       checkedAt: '2026-07-16T15:30:00.000Z',
@@ -69,6 +72,7 @@ describe('Model Catalog service', () => {
     services.push(mock);
     expect(await mock.getModelCatalog()).toEqual({
       text: ['gpt-5.6-luna'],
+      multimodalText: ['gpt-5.6-luna'],
       image: ['gpt-image-2'],
       source: 'mock',
       checkedAt: '2026-07-16T15:32:00.000Z',
@@ -84,6 +88,7 @@ describe('Model Catalog service', () => {
     services.push(defaults);
     expect(await defaults.getModelCatalog()).toEqual({
       text: ['gpt-5.6-luna'],
+      multimodalText: ['gpt-5.6-luna'],
       image: ['gpt-image-2'],
       source: 'defaults',
       checkedAt: '2026-07-16T15:31:00.000Z',
