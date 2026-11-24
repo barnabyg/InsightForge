@@ -230,3 +230,22 @@ test('Author completes an Insight Revision without exposing mixed workflow state
   await expect(discardableRevision).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'Begin Insight Revision' })).toBeVisible();
 });
+
+test('generation dialog fits narrow screens and contains keyboard focus', async ({ page }) => {
+  await page.setViewportSize({ width: 320, height: 568 });
+  await createProject(page, 'Keep follow-up visits visible during shift changes.');
+  const trigger = page.getByRole('button', { name: 'Generate complete workflow' });
+  await trigger.click();
+  const dialog = page.getByRole('dialog');
+  const cancel = dialog.getByRole('button', { name: 'Cancel' });
+  await cancel.focus();
+  await page.keyboard.press('Shift+Tab');
+  const confirm = dialog.getByRole('button', { name: 'Start 5 operations' });
+  await expect(confirm).toBeFocused();
+  const box = await confirm.boundingBox();
+  expect(box!.x + box!.width).toBeLessThanOrEqual(320);
+  await page.keyboard.press('Tab');
+  await expect(cancel).toBeFocused();
+  await page.keyboard.press('Escape');
+  await expect(trigger).toBeFocused();
+});

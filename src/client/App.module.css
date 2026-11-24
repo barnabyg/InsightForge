@@ -554,19 +554,18 @@ a {
   text-decoration: underline;
 }
 
-.modal-backdrop {
-  position: fixed;
-  z-index: 60;
-  inset: 0;
-  padding: 24px;
-  display: grid;
-  place-items: center;
+.modal::backdrop {
   background: rgb(27 27 24 / 44%);
   backdrop-filter: blur(3px);
 }
 
 .modal {
-  width: min(480px, 100%);
+  width: min(480px, calc(100% - 24px));
+  max-width: calc(100% - 24px);
+  max-height: calc(100dvh - 24px);
+  overflow: auto;
+  overscroll-behavior: contain;
+  color: var(--ink);
   padding: 28px;
   border: 1px solid #aaa295;
   background: var(--paper-light);
@@ -596,6 +595,7 @@ a {
 }
 
 .modal-actions {
+  flex-wrap: wrap;
   display: flex;
   justify-content: flex-end;
   gap: 9px;

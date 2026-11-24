@@ -1,4 +1,4 @@
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import styles from './App.module.css';
 
 interface ModalProps {
@@ -9,47 +9,50 @@ interface ModalProps {
 }
 
 export function Modal({ title, children, actions, onDismiss }: ModalProps) {
-  const modal = useRef<HTMLElement>(null);
-  const dismiss = useRef(onDismiss);
-  dismiss.current = onDismiss;
+  const modal = useRef<HTMLDialogElement>(null);
+  const titleId = useId();
 
   useEffect(() => {
-    const previouslyFocused = document.activeElement;
-    const focusTarget = modal.current?.querySelector<HTMLElement>(
-      'input, button, textarea, select, [tabindex]:not([tabindex="-1"])',
-    );
-    focusTarget?.focus();
-
-    function dismissOnEscape(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        dismiss.current();
-      }
-    }
-    document.addEventListener('keydown', dismissOnEscape);
+    const dialog = modal.current!;
+    const previous = document.activeElement;
+    dialog.showModal();
     return () => {
-      document.removeEventListener('keydown', dismissOnEscape);
-      if (previouslyFocused instanceof HTMLElement) {
-        previouslyFocused.focus();
-      }
+      dialog.close();
+      if (previous instanceof HTMLElement && previous.isConnected) previous.focus();
     };
   }, []);
 
   return (
-    <div className={styles['modal-backdrop']} role="presentation" onMouseDown={onDismiss}>
-      <section
-        ref={modal}
-        className={styles.modal}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="modal-title"
-        onMouseDown={(event) => event.stopPropagation()}
-      >
-        <p className={styles.eyebrow}>Project action</p>
-        <h2 id="modal-title">{title}</h2>
-        <div className={styles['modal-body']}>{children}</div>
-        <div className={styles['modal-actions']}>{actions}</div>
-      </section>
-    </div>
+    <dialog
+      ref={modal}
+      className={styles.modal}
+      aria-labelledby={titleId}
+      onCancel={event => { event.preventDefault(); onDismiss(); }}
+      onClick={event => {
+        if (event.target !== event.currentTarget) return;
+        const bounds = event.currentTarget.getBoundingClientRect();
+        if (event.clientX < bounds.left || event.clientX > bounds.right
+          || event.clientY < bounds.top || event.clientY > bounds.bottom) onDismiss();
+      }}
+      onKeyDown={event => {
+        if (event.key !== 'Tab') return;
+        const controls = Array.from(event.currentTarget.querySelectorAll<HTMLElement>(
+          'button:enabled, a[href], input:enabled, select:enabled, textarea:enabled, summary, [tabindex="0"]',
+        )).filter(element => element.getClientRects().length > 0);
+        const first = controls[0];
+        const last = controls.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }}
+    >
+      <h2 id={titleId}>{title}</h2>
+      <div className={styles['modal-body']}>{children}</div>
+      <div className={styles['modal-actions']}>{actions}</div>
+    </dialog>
   );
 }
