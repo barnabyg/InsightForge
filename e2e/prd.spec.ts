@@ -39,6 +39,7 @@ test('Author generates and inspects a persisted PRD from the Design Brief and Co
   await expect(hits.first()).toHaveAttribute('aria-current', 'true');
   await search.fill('FR-001');
   await expect(page.locator('mark[aria-current]')).toBeInViewport();
+  await expect(search).toBeInViewport();
   await page.setViewportSize({ width: 390, height: 844 });
   await page.evaluate(() => window.scrollTo(0, 0));
   const inspector = page.getByRole('complementary', { name: 'Run Inspector' });
