@@ -21,6 +21,8 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 export interface WorkflowConfigurationController {
+  loadError: string | null;
+  retryLoad(): void;
   configuration: WorkflowConfiguration | null;
   models: ModelCatalog | null;
   loading: boolean;
