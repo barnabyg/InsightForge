@@ -33,7 +33,7 @@ function assembledRequest(stage: StageConfiguration, prompt: string): string {
 
 interface StageEditorProps {
   stage: StageConfiguration;
-  models: ModelCatalog;
+  models: ModelCatalog | null;
   onSaveDraft(stageId: StageId, draft: CommitStageConfigurationInput): Promise<void>;
   onDiscardDraft(stageId: StageId): Promise<void>;
   onSave(
@@ -138,7 +138,7 @@ function StageEditor({
   const changed = prompt !== stage.prompt
     || model !== stage.model
     || imageQuality !== stage.imageQuality;
-  const discoveredModels = stage.id === 'prd'
+  const discoveredModels = !models ? [] : stage.id === 'prd'
     ? models.multimodalText
     : stage.kind === 'text'
       ? models.text
@@ -388,12 +388,19 @@ export function WorkflowConfigurationPage() {
     }
   }
 
-  if (controller.loading || !controller.configuration || !controller.models) {
-    return <main className={styles['main-content']}><p className={styles['library-loading']}>Loading shared workflow configuration…</p></main>;
+  const loadNotice = controller.loadError && (
+    <div className={styles['inline-error']} role="alert">
+      {controller.loadError} <button type="button" onClick={controller.retryLoad}>Retry</button>
+    </div>
+  );
+  if (!controller.configuration) {
+    return <main className={styles['main-content']}>{loadNotice ??
+      <p role="status">Loading shared workflow configuration…</p>}</main>;
   }
 
   const stage = controller.configuration.stages.find(({ id }) => id === selectedStage)!;
-  const catalogLabel = `${controller.models.source === 'mock' ? 'Mock' : controller.models.source === 'live' ? 'Live' : controller.models.source === 'cache' ? 'Cached' : 'Default'} model catalog`;
+  const catalog = controller.models;
+  const catalogLabel = catalog && `${catalog.source === 'mock' ? 'Mock' : catalog.source === 'live' ? 'Live' : catalog.source === 'cache' ? 'Cached' : 'Default'} model catalog`;
 
   return (
     <main className={styles['configuration-page']}>
@@ -427,11 +434,12 @@ export function WorkflowConfigurationPage() {
         <div className={styles['inline-error']} role="alert">{controller.error ?? fileError}</div>
       )}
 
-      <section className={styles['model-catalog-bar']}>
+      {loadNotice}
+      {catalog && <section className={styles['model-catalog-bar']}>
         <span><span className={styles['catalog-dot']} aria-hidden="true" /> {catalogLabel}</span>
-        <span>{controller.models.text.length} text · {controller.models.multimodalText.length} PRD · {controller.models.image.length} image</span>
+        <span>{catalog.text.length} text · {catalog.multimodalText.length} PRD · {catalog.image.length} image</span>
         <button type="button" onClick={() => void controller.refreshModels()}>Refresh models</button>
-      </section>
+      </section>}
 
       <div className={styles['stage-tabs']} role="tablist" aria-label="Generated stages">
         {controller.configuration.stages.map((candidate, index) => (

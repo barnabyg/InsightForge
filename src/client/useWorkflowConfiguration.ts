@@ -42,33 +42,31 @@ export function useWorkflowConfiguration(): WorkflowConfigurationController {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  const [loadAttempt, setLoadAttempt] = useState(0);
+  const [loadError, setLoadError] = useState<string | null>(null);
   useEffect(() => {
     let active = true;
     async function load() {
-      try {
-        const [loadedConfiguration, loadedModels] = await Promise.all([
-          requestJson<WorkflowConfiguration>('/api/workflow-configuration'),
-          requestJson<ModelCatalog>('/api/models'),
-        ]);
-        if (active) {
-          setConfiguration(loadedConfiguration);
-          setModels(loadedModels);
-        }
-      } catch (loadError) {
-        if (active) {
-          setError(loadError instanceof Error
-            ? loadError.message
-            : 'Workflow Configuration could not be loaded');
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
+      setLoading(true);
+      setLoadError(null);
+      const [settings, catalog] = await Promise.allSettled([
+        requestJson<WorkflowConfiguration>('/api/workflow-configuration'),
+        requestJson<ModelCatalog>('/api/models'),
+      ]);
+      if (!active) return;
+      const failed: string[] = [];
+      if (settings.status === 'fulfilled') setConfiguration(settings.value);
+      else failed.push('shared configuration');
+      if (catalog.status === 'fulfilled') setModels(catalog.value);
+      else failed.push('model catalog');
+      if (failed.length) setLoadError(`Could not load the ${failed.join(' and ')}.`);
+      setLoading(false);
     }
     void load();
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadAttempt]);
 
   const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
     setError(null);
@@ -162,6 +160,8 @@ export function useWorkflowConfiguration(): WorkflowConfigurationController {
 
   return {
     configuration,
+    loadError,
+    retryLoad: () => setLoadAttempt(attempt => attempt + 1),
     models,
     loading,
     error,

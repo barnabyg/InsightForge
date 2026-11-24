@@ -132,3 +132,14 @@ test('PRD prompt editing returns to the originating project stage', async ({ pag
   await page.getByRole('link', { name: 'Return to PRD' }).click();
   await expect(page.getByRole('heading', { name: 'PRD', exact: true })).toBeVisible();
 });
+
+test('catalog failure preserves saved settings and offers recovery', async ({ page }) => {
+  await page.route('**/api/models', route => route.fulfill({ status: 503, body: '{}' }));
+  await page.goto('/?view=prompts');
+  await expect(page.getByRole('alert')).toContainText('model catalog');
+  await expect(page.getByRole('textbox', { name: 'Design Brief Stage Prompt' })).toBeVisible();
+  await page.unroute('**/api/models');
+  await page.getByRole('button', { name: 'Retry' }).click();
+  await expect(page.getByText('Mock model catalog')).toBeVisible();
+  await expect(page.getByRole('alert')).toHaveCount(0);
+});
