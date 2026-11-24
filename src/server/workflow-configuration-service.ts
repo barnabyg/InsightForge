@@ -306,8 +306,8 @@ export async function openWorkflowConfigurationService(
         INSERT INTO prompt_drafts (stage_id, prompt, updated_at, model, image_quality)
         VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(stage_id) DO UPDATE SET
-          model = excluded.model,
-          image_quality = excluded.image_quality,
+          model = COALESCE(excluded.model, prompt_drafts.model),
+          image_quality = COALESCE(excluded.image_quality, prompt_drafts.image_quality),
           prompt = excluded.prompt,
           updated_at = excluded.updated_at
       `).run(stageId, prompt, now().toISOString(), settings?.model ?? null, settings?.imageQuality ?? null);
