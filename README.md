@@ -47,6 +47,18 @@ Concept Screen mock runs produce three deterministic 1024 × 768 PNG interfaces.
 
 By default, application data is stored in the current user's operating-system application-data directory. Tests and isolated development sessions can set `INSIGHTFORGE_DATA_DIR` to override that location.
 
+## Review a generated project
+
+From the repository root in PowerShell 7 with Node.js 24 or later, this command installs dependencies and starts the app in mock mode with a separate local review workspace:
+
+```powershell
+& { $env:INSIGHTFORGE_OPENAI_MODE = 'mock'; $env:INSIGHTFORGE_DATA_DIR = Join-Path $env:LOCALAPPDATA 'InsightForge-UX-Review'; npm.cmd ci && npm.cmd run dev }
+```
+
+Open [the local app](http://127.0.0.1:5173), create a project, and enter a short observation. Choose **Generate complete workflow**, confirm the five operations, then choose **Review design brief**. Continue to Concept Screens and open a screen. **Fit** shows the full image and **Actual size** shows one image pixel per CSS pixel. Continue to the PRD and search for `FR-001`. Enter and Shift+Enter move between matches.
+
+Open **Generation settings and actions** on the PRD and choose **Edit PRD prompt**. Prompt text, model, and image quality are saved together as an unpublished draft. **Save globally** applies the stage settings to future runs. **Return to PRD** reopens the same project. In the library, **Back up project** includes its history and **Download deliverables** packages its current outputs.
+
 ## Verification
 
 Install the Playwright browser once on a development machine:
