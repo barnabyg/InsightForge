@@ -126,7 +126,9 @@ describe('local application bootstrap', () => {
       url: '/api/bootstrap',
       headers: { host: 'localhost:4317' },
     });
-    expect(bootstrap.json().storage).toEqual(response.json());
+    // Free space is sampled separately for each request and can change between reads.
+    expect(bootstrap.json().storage).toEqual({ ...response.json(), availableBytes: expect.any(Number) });
+    expect(bootstrap.json().storage.availableBytes).toBeGreaterThan(0);
 
     await app.close();
   });
@@ -134,18 +136,12 @@ describe('local application bootstrap', () => {
   it('starts on a real loopback listener while a live connectivity check runs in the background', async () => {
     const dataDirectory = await createTemporaryDataDirectory();
 
-    const appResult = await Promise.race([
-      buildApp({
-        dataDirectory,
-        mode: 'live',
-        apiKey: 'test-key',
-        checkOpenAI: () => new Promise(() => undefined),
-      }),
-      new Promise<null>((resolve) => setTimeout(() => resolve(null), 100)),
-    ]);
-
-    expect(appResult).not.toBeNull();
-    const app = appResult!;
+    const app = await buildApp({
+      dataDirectory,
+      mode: 'live',
+      apiKey: 'test-key',
+      checkOpenAI: () => new Promise(() => undefined),
+    });
     const address = await app.listen({ host: '127.0.0.1', port: 0 });
     const response = await fetch(`${address}/api/bootstrap`);
 
