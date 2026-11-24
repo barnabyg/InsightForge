@@ -4,6 +4,16 @@ InsightForge is a local workflow application for turning a product insight into 
 
 The product definition is in [the MVP specification](docs/product/insightforge-mvp.md), and implementation work is tracked in the [InsightForge MVP milestone](https://github.com/barnabyg/InsightForge/milestone/1).
 
+## Start on Windows
+
+Install Node.js 24 or later, then double-click `run.bat` or run this command from the repository root in PowerShell:
+
+```powershell
+.\run.bat
+```
+
+The launcher installs dependencies on the first run, builds the app, and starts the local server. Open [InsightForge](http://127.0.0.1:4317) to see the project library. Keep the launcher window open while using the app. Press Ctrl+C in that window to stop it.
+
 ## Development
 
 InsightForge currently requires Node.js 24 or later because its local persistence layer uses the built-in SQLite module.
