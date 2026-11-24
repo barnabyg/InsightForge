@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import type {
+  CommitStageConfigurationInput,
   ImageQuality,
   ModelCatalog,
   StageConfiguration,
@@ -33,7 +34,7 @@ function assembledRequest(stage: StageConfiguration, prompt: string): string {
 interface StageEditorProps {
   stage: StageConfiguration;
   models: ModelCatalog;
-  onSaveDraft(stageId: StageId, prompt: string): Promise<void>;
+  onSaveDraft(stageId: StageId, draft: CommitStageConfigurationInput): Promise<void>;
   onDiscardDraft(stageId: StageId): Promise<void>;
   onSave(
     stageId: StageId,
@@ -50,10 +51,14 @@ function StageEditor({
   onSave,
   onReset,
 }: StageEditorProps) {
-  const initialPrompt = stage.draftPrompt?.prompt ?? stage.prompt;
-  const [prompt, setPrompt] = useState(initialPrompt);
-  const [model, setModel] = useState(stage.model);
-  const [imageQuality, setImageQuality] = useState(stage.imageQuality);
+  const active = { prompt: stage.prompt, model: stage.model, imageQuality: stage.imageQuality };
+  const saved = {
+    prompt: stage.draftPrompt?.prompt ?? stage.prompt,
+    model: stage.draftPrompt?.model ?? stage.model,
+    imageQuality: stage.draftPrompt?.imageQuality ?? stage.imageQuality,
+  };
+  const [draft, setDraft] = useState(saved);
+  const { prompt, model, imageQuality } = draft;
   const [feedback, setFeedback] = useState<DraftFeedback>(
     stage.draftPrompt ? 'draft_saved' : 'active',
   );
@@ -62,60 +67,45 @@ function StageEditor({
   const [previewOpen, setPreviewOpen] = useState(false);
   const [resetOpen, setResetOpen] = useState(false);
   const editor = useRef<HTMLTextAreaElement>(null);
-  const latestPrompt = useRef(initialPrompt);
-  const persistedPrompt = useRef(stage.draftPrompt?.prompt ?? stage.prompt);
+  const latest = useRef(draft);
+  const persisted = useRef(draft);
   const draftInFlight = useRef<Promise<void> | null>(null);
-  const activeSignature = useRef(
-    `${stage.prompt}\u0000${stage.model}\u0000${stage.imageQuality ?? ''}`,
-  );
+
+  function editDraft(change: Partial<CommitStageConfigurationInput>) {
+    latest.current = { ...latest.current, ...change };
+    setDraft(latest.current);
+    setFeedback('pending');
+    if ('model' in change || 'imageQuality' in change) {
+      void persistLatestDraft().catch(() => undefined);
+    }
+  }
 
   useEffect(() => {
-    const signature = `${stage.prompt}\u0000${stage.model}\u0000${stage.imageQuality ?? ''}`;
-    const nextPrompt = stage.draftPrompt?.prompt ?? stage.prompt;
-    if (signature !== activeSignature.current) {
-      activeSignature.current = signature;
-      persistedPrompt.current = nextPrompt;
-      latestPrompt.current = nextPrompt;
-      const needsSync = prompt !== nextPrompt
-        || model !== stage.model
-        || imageQuality !== stage.imageQuality;
-      setPrompt(nextPrompt);
-      setModel(stage.model);
-      setImageQuality(stage.imageQuality);
-      if (needsSync) {
-        setFeedback(stage.draftPrompt ? 'draft_saved' : 'active');
-      }
-      return;
-    }
-    if (
-      stage.draftPrompt
-      && latestPrompt.current === stage.prompt
-      && stage.draftPrompt.prompt !== stage.prompt
-    ) {
-      latestPrompt.current = stage.draftPrompt.prompt;
-      persistedPrompt.current = stage.draftPrompt.prompt;
-      setPrompt(stage.draftPrompt.prompt);
-      setFeedback('draft_saved');
-    }
-  }, [stage.prompt, stage.model, stage.imageQuality, stage.draftPrompt]);
+    if (latest.current !== persisted.current) return;
+    persisted.current = saved;
+    latest.current = saved;
+    setDraft(saved);
+    setFeedback(current => stage.draftPrompt ? 'draft_saved'
+      : current === 'active_saved' ? current : 'active');
+  }, [stage.updatedAt, stage.draftPrompt?.updatedAt, stage.id]);
 
-  async function persistLatestPrompt(): Promise<void> {
+  async function persistLatestDraft(): Promise<void> {
     if (draftInFlight.current) {
       await draftInFlight.current;
-      if (latestPrompt.current !== persistedPrompt.current) {
-        return persistLatestPrompt();
+      if (latest.current !== persisted.current) {
+        return persistLatestDraft();
       }
       return;
     }
-    const value = latestPrompt.current;
-    if (value === persistedPrompt.current) return;
+    const value = latest.current;
+    if (value === persisted.current) return;
 
     setFeedback('saving');
     const operation = (async () => {
       try {
         await onSaveDraft(stage.id, value);
-        persistedPrompt.current = value;
-        setFeedback(latestPrompt.current === value ? 'draft_saved' : 'pending');
+        persisted.current = value;
+        setFeedback(latest.current === value ? 'draft_saved' : 'pending');
       } catch (error) {
         setFeedback('error');
         throw error;
@@ -130,20 +120,20 @@ function StageEditor({
   useEffect(() => {
     if (feedback !== 'pending') return;
     const timer = window.setTimeout(async () => {
-      await persistLatestPrompt().catch(() => undefined);
+      await persistLatestDraft().catch(() => undefined);
     }, 450);
     return () => window.clearTimeout(timer);
   }, [feedback, onSaveDraft, prompt, stage.id]);
 
   useEffect(() => {
     function protectLocalSelection(event: BeforeUnloadEvent) {
-      if (model !== stage.model || imageQuality !== stage.imageQuality) {
+      if (latest.current !== persisted.current) {
         event.preventDefault();
       }
     }
     window.addEventListener('beforeunload', protectLocalSelection);
     return () => window.removeEventListener('beforeunload', protectLocalSelection);
-  }, [imageQuality, model, stage.imageQuality, stage.model]);
+  }, []);
 
   const changed = prompt !== stage.prompt
     || model !== stage.model
@@ -192,7 +182,7 @@ function StageEditor({
           <h2 id="stage-editor-title">{stage.name}</h2>
         </div>
         <span className={styles['draft-status']} role="status" aria-label={status.label}>
-          <span aria-hidden="true" /> {status.visible}
+          <span aria-hidden="true" /> {changed ? 'Unpublished changes · ' : ''}{status.visible}
         </span>
       </header>
 
@@ -214,11 +204,9 @@ function StageEditor({
               value={prompt}
               wrap="soft"
               onChange={(event) => {
-                setPrompt(event.target.value);
-                latestPrompt.current = event.target.value;
-                setFeedback('pending');
+                editDraft({ prompt: event.target.value });
               }}
-              onBlur={() => void persistLatestPrompt().catch(() => undefined)}
+              onBlur={() => void persistLatestDraft().catch(() => undefined)}
             />
           </label>
           <footer className={styles['prompt-editor-footer']}>
@@ -232,7 +220,7 @@ function StageEditor({
             <p className={styles.eyebrow}>OpenAI model</p>
             <label className={styles['select-label']}>
               Model for {stage.name}
-              <select value={model} onChange={(event) => setModel(event.target.value)}>
+              <select onBlur={() => void persistLatestDraft().catch(() => undefined)} value={model} onChange={(event) => editDraft({ model: event.target.value })}>
                 {modelOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
             </label>
@@ -240,9 +228,10 @@ function StageEditor({
               <label className={styles['select-label']}>
                 Image quality
                 <select
+                  onBlur={() => void persistLatestDraft().catch(() => undefined)}
                   aria-label="Image quality"
                   value={imageQuality ?? 'medium'}
-                  onChange={(event) => setImageQuality(event.target.value as ImageQuality)}
+                  onChange={(event) => editDraft({ imageQuality: event.target.value as ImageQuality })}
                 >
                   <option value="low">Low</option>
                   <option value="medium">Medium</option>
@@ -277,6 +266,7 @@ function StageEditor({
             <div>
               <p className={styles.eyebrow}>Live comparison</p>
               <h3>Review before saving globally</h3>
+              <p>{stage.name} · {model}{imageQuality ? ` · ${imageQuality} quality` : ''}. These settings apply to future runs in every project.</p>
             </div>
             <span>{wordCount(stage.prompt)} → {wordCount(prompt)} words</span>
           </header>
@@ -299,16 +289,14 @@ function StageEditor({
           <button
             className={styles['secondary-action']}
             type="button"
-            disabled={!stage.draftPrompt && prompt === stage.prompt}
+            disabled={!stage.draftPrompt && !changed}
             onClick={() => void (async () => {
               try {
-                await persistLatestPrompt();
+                await persistLatestDraft();
                 await onDiscardDraft(stage.id);
-                setPrompt(stage.prompt);
-                latestPrompt.current = stage.prompt;
-                persistedPrompt.current = stage.prompt;
-                setModel(stage.model);
-                setImageQuality(stage.imageQuality);
+                latest.current = active;
+                persisted.current = active;
+                setDraft(active);
                 setFeedback('active');
               } catch {
                 setFeedback('error');
@@ -321,9 +309,9 @@ function StageEditor({
             disabled={!changed || !prompt.trim()}
             onClick={() => void (async () => {
               try {
-                await persistLatestPrompt();
+                await persistLatestDraft();
                 await onSave(stage.id, { prompt, model, imageQuality });
-                persistedPrompt.current = prompt;
+                persisted.current = latest.current;
                 setFeedback('active_saved');
               } catch {
                 setFeedback('error');
@@ -351,7 +339,7 @@ function StageEditor({
           actions={(
             <>
               <button className={styles['secondary-action']} type="button" onClick={() => setResetOpen(false)}>Cancel</button>
-              <button className={styles['danger-action']} type="button" onClick={() => void (async () => { await persistLatestPrompt(); await onReset(stage.id); setResetOpen(false); })()}>Reset stage</button>
+              <button className={styles['danger-action']} type="button" onClick={() => void (async () => { await persistLatestDraft(); await onReset(stage.id); setResetOpen(false); })()}>Reset stage</button>
             </>
           )}
         >

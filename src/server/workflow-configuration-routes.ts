@@ -44,12 +44,24 @@ export function registerWorkflowConfigurationRoutes(
     '/api/workflow-configuration/stages/:stageId/draft',
     async (request, reply) => {
       const id = stageId(request.params.stageId);
-      const body = request.body as { prompt?: unknown } | null;
+      const body = request.body as Partial<CommitStageConfigurationInput> | null;
       if (!id) return badRequest(reply, 'Unknown workflow stage');
       if (!body || typeof body.prompt !== 'string') {
         return badRequest(reply, 'Prompt Draft must be text');
       }
-      configuration.savePromptDraft(id, body.prompt);
+      if (body.model === undefined && body.imageQuality === undefined) {
+        configuration.savePromptDraft(id, body.prompt);
+      } else {
+        if (typeof body.model !== 'string' || !body.model.trim()
+          || (id === 'concept_screens'
+            ? !['low', 'medium', 'high'].includes(body.imageQuality ?? '')
+            : body.imageQuality !== null)) {
+          return badRequest(reply, 'Invalid draft settings');
+        }
+        configuration.savePromptDraft(id, body.prompt, {
+          model: body.model, imageQuality: body.imageQuality ?? null,
+        });
+      }
       return configuration.getWorkflowConfiguration();
     },
   );

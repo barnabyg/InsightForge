@@ -59,6 +59,13 @@ test('Author safely improves and restores the shared workflow configuration', as
 
   await page.getByRole('tab', { name: 'Concept Screens' }).click();
   await page.getByLabel('Image quality').selectOption('high');
+  await expect(page.getByText(/Unpublished changes/)).toBeVisible();
+  await page.getByRole('tab', { name: 'Design Brief' }).click();
+  await page.getByRole('tab', { name: 'Concept Screens' }).click();
+  await expect(page.getByLabel('Image quality')).toHaveValue('high');
+  await page.reload();
+  await page.getByRole('tab', { name: 'Concept Screens' }).click();
+  await expect(page.getByLabel('Image quality')).toHaveValue('high');
   await page.getByRole('button', { name: 'Save globally' }).click();
   await expect(page.getByLabel('Image quality')).toHaveValue('high');
 

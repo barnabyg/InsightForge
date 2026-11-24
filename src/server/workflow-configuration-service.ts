@@ -27,6 +27,8 @@ interface StageRow {
   image_quality: ImageQuality | null;
   updated_at: string;
   draft_prompt: string | null;
+  draft_model: string | null;
+  draft_quality: ImageQuality | null;
   draft_updated_at: string | null;
 }
 
@@ -36,7 +38,7 @@ export interface WorkflowConfigurationServiceOptions {
 
 export interface WorkflowConfigurationService {
   getWorkflowConfiguration(): WorkflowConfiguration;
-  savePromptDraft(stageId: StageId, prompt: string): void;
+  savePromptDraft(stageId: StageId, prompt: string, settings?: Pick<CommitStageConfigurationInput, 'model' | 'imageQuality'>): void;
   discardPromptDraft(stageId: StageId): void;
   commitStageConfiguration(
     stageId: StageId,
@@ -251,6 +253,8 @@ export async function openWorkflowConfigurationService(
         configuration.image_quality,
         configuration.updated_at,
         draft.prompt AS draft_prompt,
+        draft.model AS draft_model,
+        draft.image_quality AS draft_quality,
         draft.updated_at AS draft_updated_at
       FROM stage_configurations AS configuration
       LEFT JOIN prompt_drafts AS draft
@@ -278,8 +282,12 @@ export async function openWorkflowConfigurationService(
             model: definition.model,
             imageQuality: definition.imageQuality,
           },
-          draftPrompt: row.draft_prompt && row.draft_updated_at
-            ? { prompt: row.draft_prompt, updatedAt: row.draft_updated_at }
+          draftPrompt: row.draft_prompt !== null && row.draft_updated_at
+            ? {
+                prompt: row.draft_prompt,
+                updatedAt: row.draft_updated_at,
+                ...(row.draft_model ? { model: row.draft_model, imageQuality: row.draft_quality } : {}),
+              }
             : null,
           updatedAt: row.updated_at,
         };
@@ -292,15 +300,17 @@ export async function openWorkflowConfigurationService(
       return readWorkflowConfiguration();
     },
 
-    savePromptDraft(stageId, prompt) {
+    savePromptDraft(stageId, prompt, settings) {
       defaultStage(stageId);
       database.prepare(`
-        INSERT INTO prompt_drafts (stage_id, prompt, updated_at)
-        VALUES (?, ?, ?)
+        INSERT INTO prompt_drafts (stage_id, prompt, updated_at, model, image_quality)
+        VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(stage_id) DO UPDATE SET
+          model = excluded.model,
+          image_quality = excluded.image_quality,
           prompt = excluded.prompt,
           updated_at = excluded.updated_at
-      `).run(stageId, prompt, now().toISOString());
+      `).run(stageId, prompt, now().toISOString(), settings?.model ?? null, settings?.imageQuality ?? null);
     },
 
     discardPromptDraft(stageId) {

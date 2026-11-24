@@ -25,7 +25,7 @@ export interface WorkflowConfigurationController {
   models: ModelCatalog | null;
   loading: boolean;
   error: string | null;
-  savePromptDraft(stageId: StageId, prompt: string): Promise<void>;
+  savePromptDraft(stageId: StageId, draft: CommitStageConfigurationInput): Promise<void>;
   discardPromptDraft(stageId: StageId): Promise<void>;
   saveStage(stageId: StageId, input: CommitStageConfigurationInput): Promise<void>;
   resetStage(stageId: StageId): Promise<void>;
@@ -82,11 +82,11 @@ export function useWorkflowConfiguration(): WorkflowConfigurationController {
     }
   }, []);
 
-  const savePromptDraft = useCallback(async (stageId: StageId, prompt: string) => {
+  const savePromptDraft = useCallback(async (stageId: StageId, draft: CommitStageConfigurationInput) => {
     await run(async () => {
       setConfiguration(await requestJson<WorkflowConfiguration>(
         `/api/workflow-configuration/stages/${stageId}/draft`,
-        { method: 'PUT', body: JSON.stringify({ prompt }) },
+        { method: 'PUT', body: JSON.stringify(draft) },
       ));
     });
   }, [run]);

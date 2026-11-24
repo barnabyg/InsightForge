@@ -371,6 +371,14 @@ export async function initializeStorage(
       );
     `);
 
+    const draftColumns = database.prepare('PRAGMA table_info(prompt_drafts)').all();
+    if (!draftColumns.some(column => column.name === 'model')) {
+      database.exec('ALTER TABLE prompt_drafts ADD COLUMN model TEXT;');
+    }
+    if (!draftColumns.some(column => column.name === 'image_quality')) {
+      database.exec('ALTER TABLE prompt_drafts ADD COLUMN image_quality TEXT;');
+    }
+
     const stageRunColumns = database.prepare('PRAGMA table_info(stage_runs)')
       .all() as unknown as Array<{ name: string }>;
     if (!stageRunColumns.some(({ name }) => name === 'settings_json')) {
