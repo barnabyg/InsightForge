@@ -67,7 +67,7 @@ test('Author generates and inspects a persisted PRD from the Design Brief and Co
   await page.getByRole('button', { name: 'Save name' }).click();
   const download = page.waitForEvent('download');
   await page.getByRole('article', { name: 'Retrofit decisions' })
-    .getByRole('link', { name: 'Export project deliverables' }).click();
+    .getByRole('link', { name: 'Download deliverables' }).click();
   expect((await download).suggestedFilename()).toBe(
     'retrofit-decisions-deliverables.zip',
   );

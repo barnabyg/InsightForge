@@ -68,11 +68,13 @@ export function ProjectLibrary({
     <main className={styles['main-content']} id="projects">
       <section className={styles['library-hero']} aria-labelledby="hero-title">
         <div>
-          <p className={styles.eyebrow}>Product thinking, forged through iteration</p>
-          <h1 id="hero-title">Turn an insight into a product direction.</h1>
-          <p className={styles['hero-copy']}>
-            Shape the prompts. Run the workflow. Refine the thinking behind every artifact.
-          </p>
+          {projects.length ? <h1 id="hero-title">Projects</h1> : <>
+            <p className={styles.eyebrow}>Product thinking, forged through iteration</p>
+            <h1 id="hero-title">Turn an insight into a product direction.</h1>
+            <p className={styles['hero-copy']}>
+              Shape the prompts. Run the workflow. Refine the thinking behind every artifact.
+            </p>
+          </>}
         </div>
         <div className={styles['library-hero-actions']}>
           <button
@@ -102,34 +104,10 @@ export function ProjectLibrary({
         </div>
       </section>
 
-      <aside className={styles['privacy-notice']} aria-label="Privacy and OpenAI boundary">
-        <span className={styles['privacy-mark']} aria-hidden="true">◎</span>
-        <div>
-          <strong>Projects stay on this device.</strong>
-          <p>
-            When you generate, only the assembled prompt and required stage inputs are sent to OpenAI.
-          </p>
-        </div>
-      </aside>
-
-      {storage && (
-        <aside className={styles['storage-usage']} aria-label="Local storage usage">
-          <div>
-            <span>Local storage</span>
-            <strong>{formatBytes(storage.totalBytes)}</strong>
-          </div>
-          <div className={styles['storage-location']}>
-            <span>Application data</span>
-            <code title={storage.dataDirectory}>{storage.dataDirectory}</code>
-          </div>
-        </aside>
-      )}
-
       <section className={styles['project-library']} aria-labelledby="library-title">
         <div className={styles['section-heading']}>
           <div>
-            <p className={styles.eyebrow}>Project library</p>
-            <h2 id="library-title">Recent lines of thought</h2>
+            <h2 id="library-title">Recent projects</h2>
           </div>
           <span className={styles['section-meta']}>
             {projects.length} {projects.length === 1 ? 'Project' : 'Projects'} · locally saved
@@ -190,16 +168,16 @@ export function ProjectLibrary({
                   </div>
                   <div className={styles['project-actions']}>
                     <a
-                      aria-label="Export Project"
+                      aria-label="Back up project"
                       href={`/api/projects/${project.id}/export`}
                       download
-                    >Export</a>
+                    >Back up project</a>
                     {project.prdPresent && (
                       <a
-                        aria-label="Export project deliverables"
+                        aria-label="Download deliverables"
                         href={`/api/projects/${project.id}/deliverables`}
                         download
-                      >Deliverables</a>
+                      >Download deliverables</a>
                     )}
                     <button type="button" aria-label="Rename project" onClick={() => setRename({ id: project.id, name: project.name })}>Rename</button>
                     <button type="button" aria-label="Duplicate project" disabled={busy} onClick={() => void perform(() => onDuplicate(project.id))}>Duplicate</button>
@@ -211,6 +189,32 @@ export function ProjectLibrary({
           </div>
         )}
       </section>
+
+        <aside className={styles['privacy-notice']} aria-label="Privacy and OpenAI boundary">
+          <span className={styles['privacy-mark']} aria-hidden="true">◎</span>
+          <div>
+            <strong>Projects stay on this device.</strong>
+            <p>
+              When you generate, only the assembled prompt and required stage inputs are sent to OpenAI.
+            </p>
+          </div>
+        </aside>
+
+      <details className={styles['workspace-details']}>
+        <summary>Workspace details</summary>
+        {storage && (
+          <aside className={styles['storage-usage']} aria-label="Local storage usage">
+            <div>
+              <span>Local storage</span>
+              <strong>{formatBytes(storage.totalBytes)}</strong>
+            </div>
+            <div className={styles['storage-location']}>
+              <span>Application data</span>
+              <code title={storage.dataDirectory}>{storage.dataDirectory}</code>
+            </div>
+          </aside>
+        )}
+      </details>
 
       {rename && (
         <Modal

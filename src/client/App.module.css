@@ -390,6 +390,9 @@ a {
   border-top: 1px solid var(--ink);
 }
 
+.workspace-details { margin-top: 28px; color: var(--muted); }
+.workspace-details summary { cursor: pointer; padding-block: 10px; }
+.project-actions { flex-wrap: wrap; }
 .project-library {
   border-top: 1px solid var(--ink);
 }

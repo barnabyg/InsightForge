@@ -86,7 +86,7 @@ test('restored backups reopen with all artifacts and their preserved history', a
   await page.getByRole('link', { name: 'All projects' }).click();
   const originalExport = await card.locator('a[download]').first().getAttribute('href');
   const downloading = page.waitForEvent('download');
-  await card.getByRole('link', { name: /^(Back up project|Export Project)$/i }).click();
+  await card.getByRole('link', { name: 'Back up project' }).click();
   const file = testInfo.outputPath('restored.zip');
   await (await downloading).saveAs(file);
   const reimport = page.waitForResponse(response => response.url().endsWith('/api/project-imports'));

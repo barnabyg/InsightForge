@@ -56,7 +56,7 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
     exact: true,
   });
   const projectExportDownload = page.waitForEvent('download');
-  await renamedCard.getByRole('link', { name: 'Export Project' }).click();
+  await renamedCard.getByRole('link', { name: 'Back up project' }).click();
   const projectExport = await projectExportDownload;
   expect(projectExport.suggestedFilename()).toBe(
     'confident-retrofit-choices-project-export.zip',
@@ -116,6 +116,6 @@ test('Author creates, imports, saves, and manages Projects', async ({ page }) =>
 
   await page.goBack();
   await expect(
-    page.getByRole('heading', { name: 'Recent lines of thought' }),
+    page.getByRole('heading', { name: 'Recent projects' }),
   ).toBeVisible();
 });
