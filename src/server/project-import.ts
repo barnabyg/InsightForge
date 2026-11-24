@@ -10,6 +10,7 @@ import {
   rmSync,
   writeFileSync,
 } from 'node:fs';
+import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { strFromU8, Unzip, UnzipInflate } from 'fflate';
@@ -748,6 +749,14 @@ function validateReferences(payload: ProjectExportEnvelope, files: ArchiveFiles)
     }
     return { artifact, run };
   };
+  // Restoration gives immutable artifact copies fresh IDs while retaining run provenance.
+  const matchesArtifact = (recordedId: unknown, currentId: string) => {
+    if (recordedId === currentId) return true;
+    const recorded = typeof recordedId === 'string' ? artifacts.get(recordedId) : undefined;
+    const current = artifacts.get(currentId);
+    return Boolean(recorded && current && recorded.runId === current.runId
+      && isDeepStrictEqual({ ...recorded, id: current.id }, current));
+  };
   const validatePrdLineage = (
     run: ProjectExportEnvelope['stageRuns'][number],
     designBriefId: string,
@@ -756,7 +765,7 @@ function validateReferences(payload: ProjectExportEnvelope, files: ArchiveFiles)
   ) => {
     const designBrief = artifacts.get(designBriefId)!;
     const conceptScreens = artifacts.get(conceptScreensId)!;
-    if (run.inputArtifactId !== designBriefId || run.inputRunId !== designBrief.runId) {
+    if (!matchesArtifact(run.inputArtifactId, designBriefId) || run.inputRunId !== designBrief.runId) {
       invalidStructure(`${label} PRD does not consume its Design Brief.`);
     }
     const lineage = record(run.inputLineage, `${label} PRD input lineage`);
@@ -766,9 +775,9 @@ function validateReferences(payload: ProjectExportEnvelope, files: ArchiveFiles)
       `${label} PRD Concept Screen Set lineage`,
     );
     if (
-      designLineage.artifactId !== designBriefId
+      !matchesArtifact(designLineage.artifactId, designBriefId)
       || designLineage.runId !== designBrief.runId
-      || conceptLineage.artifactId !== conceptScreensId
+      || !matchesArtifact(conceptLineage.artifactId, conceptScreensId)
       || conceptLineage.runId !== conceptScreens.runId
     ) {
       invalidStructure(`${label} PRD lineage does not match its upstream Artifacts.`);
@@ -804,7 +813,7 @@ function validateReferences(payload: ProjectExportEnvelope, files: ArchiveFiles)
     if (
       concept && design
       && (
-        concept.run.inputArtifactId !== design.artifact.id
+        !matchesArtifact(concept.run.inputArtifactId, design.artifact.id)
         || concept.run.inputRunId !== design.run.id
         || concept.run.input !== design.artifact.markdown
       )

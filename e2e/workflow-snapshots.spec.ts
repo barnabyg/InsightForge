@@ -70,3 +70,38 @@ test('Author inspects, restores, and deletes Workflow Snapshots from compact his
   await expect(updatedHistory.getByRole('heading', { name: 'Workflow Snapshots' })).toBeVisible();
   await expect(updatedHistory.getByRole('heading', { name: 'Snapshot inspection' })).toHaveCount(0);
 });
+
+test('restored backups reopen with all artifacts and their preserved history', async ({ page }, testInfo) => {
+  await page.goto('/');
+  const upload = page.getByLabel('Import Project file');
+  const imported = page.waitForResponse(response => response.url().endsWith('/api/project-imports'));
+  await upload.setInputFiles('e2e/fixtures/restored-project-v1.zip');
+  expect((await imported).status()).toBe(201);
+  const card = page.getByRole('article', { name: /Review backup integrity/ }).first();
+  await card.getByRole('button', { name: /Open Project/ }).click();
+  await page.getByRole('button', { name: 'Workflow history, 2 snapshots' }).click();
+  await page.getByRole('button', { name: 'Restore snapshot' }).last().click();
+  await page.getByRole('button', { name: 'Restore Workflow Snapshot', exact: true }).click();
+  await expect(page.getByRole('button', { name: 'Workflow history, 3 snapshots' })).toBeVisible();
+  await page.getByRole('link', { name: 'All projects' }).click();
+  const originalExport = await card.locator('a[download]').first().getAttribute('href');
+  const downloading = page.waitForEvent('download');
+  await card.getByRole('link', { name: /^(Back up project|Export Project)$/i }).click();
+  const file = testInfo.outputPath('restored.zip');
+  await (await downloading).saveAs(file);
+  const reimport = page.waitForResponse(response => response.url().endsWith('/api/project-imports'));
+  await upload.setInputFiles(file);
+  const response = await reimport;
+  expect(response.status()).toBe(201);
+  const copy = page.getByRole('article', { name: /Review backup integrity/ })
+    .filter({ hasNot: page.locator(`a[href="${originalExport}"]`) });
+  await copy.getByRole('button', { name: /Open Project/ }).click();
+  await expect(page.getByRole('button', { name: 'Workflow history, 3 snapshots' })).toBeVisible();
+  const rail = page.getByRole('complementary', { name: 'Project stages' });
+  await rail.getByRole('button', { name: /Design Brief/ }).click();
+  await expect(page.getByRole('article', { name: 'Design Brief Artifact' })).toBeVisible();
+  await rail.getByRole('button', { name: /Concept Screens/ }).click();
+  await expect(page.getByRole('article', { name: 'Concept Screen Set' }).getByRole('img')).toHaveCount(3);
+  await rail.getByRole('button', { name: /PRD/ }).click();
+  await expect(page.getByRole('article', { name: 'PRD Artifact' })).toContainText('FR-001');
+});
