@@ -145,6 +145,7 @@ function StageEditor({
       : models.image;
   const modelOptions = [...new Set([
     stage.model,
+    model,
     ...discoveredModels,
   ])].sort();
   const matchCount = useMemo(() => {

@@ -134,10 +134,14 @@ test('PRD prompt editing returns to the originating project stage', async ({ pag
 });
 
 test('catalog failure preserves saved settings and offers recovery', async ({ page }) => {
+  await page.request.put('/api/workflow-configuration/stages/design_brief/draft', {
+    data: { prompt: 'Recovered instructions', model: 'gpt-5.4-mini', imageQuality: null },
+  });
   await page.route('**/api/models', route => route.fulfill({ status: 503, body: '{}' }));
   await page.goto('/?view=prompts');
   await expect(page.getByRole('alert')).toContainText('model catalog');
   await expect(page.getByRole('textbox', { name: 'Design Brief Stage Prompt' })).toBeVisible();
+  await expect(page.getByLabel('Model for Design Brief')).toHaveValue('gpt-5.4-mini');
   const first = page.getByRole('tab', { name: /Design Brief/ });
   await first.focus();
   await first.press('ArrowRight');
