@@ -347,7 +347,8 @@ export function ProjectWorkspace({
     rerunPlan?.affectedStages.includes(stageId) ?? false;
   const activeStage = workflow.generatingStage === 'full_generation'
     ? workflow.fullGenerationProgress?.currentStage ?? workflow.workflow?.candidate?.currentStage
-    : workflow.generatingStage;
+    : workflow.generatingStage ?? (workflow.workflow?.candidate?.status === 'running'
+      ? workflow.workflow.candidate.currentStage : null);
   const designBriefState = activeStage === 'design_brief'
     ? 'Generating'
     : rerunPlan?.earliestChangedStage === 'design_brief'
