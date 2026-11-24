@@ -823,7 +823,11 @@ export function ProjectWorkspace({
 
           <div className={styles['design-brief-layout']}>
             <div className={styles['design-brief-main']}>
-              <section className={styles['stage-action-card']} aria-label="Design Brief generation">
+              <details className={styles['generation-settings']}
+                key={workflow.workflow?.designBrief?.id ?? 'empty'}
+                open={!workflow.workflow?.designBrief || Boolean(rerunPlan) || workflow.workflow?.lastDesignBriefRun?.status === 'failed'}>
+                <summary>Generation settings and actions</summary>
+                <section className={styles['stage-action-card']} aria-label="Design Brief generation">
                 <div>
                   <p className={styles.eyebrow}>Shared Stage Configuration</p>
                   <strong>{workflow.workflow?.designBriefConfiguration.model ?? 'Loading model…'}</strong>
@@ -848,6 +852,7 @@ export function ProjectWorkspace({
                 </button>
                 {variationAction('design_brief')}
               </section>
+              </details>
 
               {updateAvailableNotice('design_brief')}
 
@@ -900,7 +905,11 @@ export function ProjectWorkspace({
 
           <div className={styles['design-brief-layout']}>
             <div className={styles['design-brief-main']}>
-              <section className={styles['stage-action-card']} aria-label="Concept Screen generation">
+              <details className={styles['generation-settings']}
+                key={workflow.workflow?.conceptScreenSet?.id ?? 'empty'}
+                open={!workflow.workflow?.conceptScreenSet || Boolean(rerunPlan) || workflow.workflow?.lastConceptScreenRun?.status === 'failed'}>
+                <summary>Generation settings and actions</summary>
+                <section className={styles['stage-action-card']} aria-label="Concept Screen generation">
                 <div>
                   <p className={styles.eyebrow}>Shared Stage Configuration</p>
                   <strong>{workflow.workflow?.conceptScreenConfiguration.model ?? 'Loading model…'}</strong>
@@ -939,6 +948,7 @@ export function ProjectWorkspace({
                 {workflow.generatingStage !== 'concept_screens'
                   && variationAction('concept_screens')}
               </section>
+              </details>
 
               {updateAvailableNotice('concept_screens')}
 
@@ -993,7 +1003,11 @@ export function ProjectWorkspace({
 
           <div className={styles['design-brief-layout']}>
             <div className={styles['design-brief-main']}>
-              <section className={styles['stage-action-card']} aria-label="PRD generation">
+              <details className={styles['generation-settings']}
+                key={workflow.workflow?.prd?.id ?? 'empty'}
+                open={!workflow.workflow?.prd || Boolean(rerunPlan) || workflow.workflow?.lastPrdRun?.status === 'failed'}>
+                <summary>Generation settings and actions</summary>
+                <section className={styles['stage-action-card']} aria-label="PRD generation">
                 <div>
                   <p className={styles.eyebrow}>Shared Stage Configuration</p>
                   <strong>{workflow.workflow?.prdConfiguration.model ?? 'Loading model…'}</strong>
@@ -1018,6 +1032,7 @@ export function ProjectWorkspace({
                 </button>
                 {variationAction('prd')}
               </section>
+              </details>
 
               {updateAvailableNotice('prd')}
 

@@ -1901,6 +1901,17 @@ a {
 .design-brief-main {
   min-width: 0;
 }
+.generation-settings, .run-details {
+  min-width: 0;
+}
+.generation-settings summary, .run-details > summary {
+  padding: 10px 14px;
+  color: var(--accent);
+  font-size: 14px;
+  cursor: pointer;
+}
+.generation-settings { margin-bottom: 12px; }
+.generation-settings[open] > summary { margin-bottom: 6px; }
 
 .stage-action-card {
   min-height: 94px;
@@ -2565,7 +2576,7 @@ a {
   }
 
   .design-brief-main {
-    display: contents;
+    display: block;
   }
 
   .stage-action-card {
@@ -2574,6 +2585,10 @@ a {
 
   .generation-blocker {
     order: 2;
+  }
+
+  .design-brief-layout:has(.run-error) .run-inspector {
+    order: -1;
   }
 
   .run-inspector {

@@ -36,70 +36,76 @@ export function RunInspector({ run, generating, elapsedSeconds, stageName }: Run
             {run.status === 'succeeded' ? 'Succeeded' : run.status === 'failed' ? 'Failed' : 'Running'}
           </div>
 
-          <dl className={styles['inspector-facts']}>
-            <div><dt>Run type</dt><dd>{runKindLabel(run.runKind)}</dd></div>
-            <div><dt>Model</dt><dd>{run.model}</dd></div>
-            <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
-            <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString('en-GB')}</time></dd></div>
-            {run.stageId === 'prd' && (
-              <>
-                <div><dt>Design Brief input</dt><dd><code>{run.stageInput.designBrief.artifactId}</code></dd></div>
-                <div><dt>Design Brief run</dt><dd><code>{run.stageInput.designBrief.runId}</code></dd></div>
-                <div><dt>Visual inputs</dt><dd>{run.stageInput.conceptScreenSet.screens.length} Concept Screens</dd></div>
-                <div><dt>Concept Screen Set</dt><dd><code>{run.stageInput.conceptScreenSet.artifactId}</code></dd></div>
-                <div><dt>Concept Screen Set run</dt><dd><code>{run.stageInput.conceptScreenSet.runId}</code></dd></div>
-                {run.stageInput.conceptScreenSet.screens.map((screen) => (
-                  <div key={screen.assetId}>
-                    <dt>Screen {screen.ordinal} asset</dt>
-                    <dd><code>{screen.assetId}</code></dd>
-                  </div>
-                ))}
-              </>
+          <details key={`${run.id}-${run.status}`}
+            className={styles['run-details']}
+            open={run.status === 'failed' || Boolean(run.validation?.warnings.length)}>
+            <summary>{run.model} · Run details{run.validation?.warnings.length
+              ? ` · ${run.validation.warnings.length} warning(s)` : ''}</summary>
+            <dl className={styles['inspector-facts']}>
+              <div><dt>Run type</dt><dd>{runKindLabel(run.runKind)}</dd></div>
+              <div><dt>Model</dt><dd>{run.model}</dd></div>
+              <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
+              <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{new Date(run.startedAt).toLocaleString('en-GB')}</time></dd></div>
+              {run.stageId === 'prd' && (
+                <>
+                  <div><dt>Design Brief input</dt><dd><code>{run.stageInput.designBrief.artifactId}</code></dd></div>
+                  <div><dt>Design Brief run</dt><dd><code>{run.stageInput.designBrief.runId}</code></dd></div>
+                  <div><dt>Visual inputs</dt><dd>{run.stageInput.conceptScreenSet.screens.length} Concept Screens</dd></div>
+                  <div><dt>Concept Screen Set</dt><dd><code>{run.stageInput.conceptScreenSet.artifactId}</code></dd></div>
+                  <div><dt>Concept Screen Set run</dt><dd><code>{run.stageInput.conceptScreenSet.runId}</code></dd></div>
+                  {run.stageInput.conceptScreenSet.screens.map((screen) => (
+                    <div key={screen.assetId}>
+                      <dt>Screen {screen.ordinal} asset</dt>
+                      <dd><code>{screen.assetId}</code></dd>
+                    </div>
+                  ))}
+                </>
+              )}
+              {run.validation && (
+                <div><dt>Validation</dt><dd>{run.validation.wordCount} words · {run.validation.status === 'valid' ? 'Valid' : 'Warning'}</dd></div>
+              )}
+            </dl>
+
+            {run.usage && (
+              <section className={styles['inspector-section']} aria-label="Token usage">
+                <h3>Usage</h3>
+                <dl className={styles['usage-grid']}>
+                  <div><dt>Input tokens</dt><dd>{run.usage.inputTokens}</dd></div>
+                  <div><dt>Output tokens</dt><dd>{run.usage.outputTokens}</dd></div>
+                  <div><dt>Total</dt><dd>{run.usage.totalTokens}</dd></div>
+                </dl>
+              </section>
             )}
-            {run.validation && (
-              <div><dt>Validation</dt><dd>{run.validation.wordCount} words · {run.validation.status === 'valid' ? 'Valid' : 'Warning'}</dd></div>
+
+            {run.validation?.warnings.map((warning) => (
+              <div className={styles['sanity-warning']} key={warning.code}>
+                <strong>Sanity Warning</strong>
+                <span>{warning.message}</span>
+              </div>
+            ))}
+
+            {run.error && (
+              <div className={styles['run-error']} role="alert">
+                <strong>{run.error.code}</strong>
+                <span>{run.error.message}</span>
+              </div>
             )}
-          </dl>
 
-          {run.usage && (
-            <section className={styles['inspector-section']} aria-label="Token usage">
-              <h3>Usage</h3>
-              <dl className={styles['usage-grid']}>
-                <div><dt>Input tokens</dt><dd>{run.usage.inputTokens}</dd></div>
-                <div><dt>Output tokens</dt><dd>{run.usage.outputTokens}</dd></div>
-                <div><dt>Total</dt><dd>{run.usage.totalTokens}</dd></div>
-              </dl>
-            </section>
-          )}
-
-          {run.validation?.warnings.map((warning) => (
-            <div className={styles['sanity-warning']} key={warning.code}>
-              <strong>Sanity Warning</strong>
-              <span>{warning.message}</span>
+            <details className={styles['inspector-details']}>
+              <summary>Assembled request</summary>
+              <pre>{run.assembledRequest}</pre>
+            </details>
+            <details className={styles['inspector-details']}>
+              <summary>Prompt snapshot</summary>
+              <pre>{run.stagePrompt}</pre>
+            </details>
+            <div className={styles['request-identifiers']}>
+              <span>Request ID</span>
+              <code>{run.requestId ?? 'Not reported'}</code>
+              <span>Response ID</span>
+              <code>{run.responseId ?? 'Not reported'}</code>
             </div>
-          ))}
-
-          {run.error && (
-            <div className={styles['run-error']} role="alert">
-              <strong>{run.error.code}</strong>
-              <span>{run.error.message}</span>
-            </div>
-          )}
-
-          <details className={styles['inspector-details']}>
-            <summary>Assembled request</summary>
-            <pre>{run.assembledRequest}</pre>
           </details>
-          <details className={styles['inspector-details']}>
-            <summary>Prompt snapshot</summary>
-            <pre>{run.stagePrompt}</pre>
-          </details>
-          <div className={styles['request-identifiers']}>
-            <span>Request ID</span>
-            <code>{run.requestId ?? 'Not reported'}</code>
-            <span>Response ID</span>
-            <code>{run.responseId ?? 'Not reported'}</code>
-          </div>
         </>
       ) : (
         <p className={styles['inspector-empty']}>

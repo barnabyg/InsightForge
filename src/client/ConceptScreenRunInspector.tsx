@@ -67,93 +67,99 @@ export function ConceptScreenRunInspector({
           <div className={`${styles['run-status']} ${styles[`run-status--${run.status}`]}`}>
             <span aria-hidden="true" /> {statusLabel(run.status)}
           </div>
-          <dl className={styles['inspector-facts']}>
-            <div><dt>Run type</dt><dd>{runKindLabel(run.runKind)}</dd></div>
-            <div><dt>Model</dt><dd>{run.model}</dd></div>
-            <div><dt>Quality</dt><dd>{run.imageQuality[0].toUpperCase() + run.imageQuality.slice(1)}</dd></div>
-            <div><dt>Progress</dt><dd>{run.completedOperationCount} of 3 PNGs</dd></div>
-            <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
-            <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{formatTimestamp(run.startedAt)}</time></dd></div>
-            <div><dt>Completed</dt><dd>{run.completedAt
-              ? <time dateTime={run.completedAt}>{formatTimestamp(run.completedAt)}</time>
-              : 'In progress'}</dd></div>
-            <div><dt>Input artifact</dt><dd><code>{run.stageInput.artifactId ?? 'Legacy run'}</code></dd></div>
-            <div><dt>Input run</dt><dd><code>{run.stageInput.runId ?? 'Legacy run'}</code></dd></div>
-            {run.validation && (
-              <div><dt>Validation</dt><dd>{run.validation.width} × {run.validation.height} · {run.validation.status === 'valid' ? 'Valid' : 'Warning'}</dd></div>
-            )}
-          </dl>
+          <details key={`${run.id}-${run.status}`}
+            className={styles['run-details']}
+            open={run.status === 'failed' || Boolean(run.validation?.warnings.length)}>
+            <summary>{run.model} · Run details{run.validation?.warnings.length
+              ? ` · ${run.validation.warnings.length} warning(s)` : ''}</summary>
+            <dl className={styles['inspector-facts']}>
+              <div><dt>Run type</dt><dd>{runKindLabel(run.runKind)}</dd></div>
+              <div><dt>Model</dt><dd>{run.model}</dd></div>
+              <div><dt>Quality</dt><dd>{run.imageQuality[0].toUpperCase() + run.imageQuality.slice(1)}</dd></div>
+              <div><dt>Progress</dt><dd>{run.completedOperationCount} of 3 PNGs</dd></div>
+              <div><dt>Duration</dt><dd>{formatDuration(run.durationMs)}</dd></div>
+              <div><dt>Started</dt><dd><time dateTime={run.startedAt}>{formatTimestamp(run.startedAt)}</time></dd></div>
+              <div><dt>Completed</dt><dd>{run.completedAt
+                ? <time dateTime={run.completedAt}>{formatTimestamp(run.completedAt)}</time>
+                : 'In progress'}</dd></div>
+              <div><dt>Input artifact</dt><dd><code>{run.stageInput.artifactId ?? 'Legacy run'}</code></dd></div>
+              <div><dt>Input run</dt><dd><code>{run.stageInput.runId ?? 'Legacy run'}</code></dd></div>
+              {run.validation && (
+                <div><dt>Validation</dt><dd>{run.validation.width} × {run.validation.height} · {run.validation.status === 'valid' ? 'Valid' : 'Warning'}</dd></div>
+              )}
+            </dl>
 
-          <section className={styles['inspector-section']} aria-label="Image operations">
-            <h3>Image operations</h3>
-            <ol className={styles['operation-list']}>
-              {run.operations.map((operation) => (
-                <li key={operation.ordinal}>
-                  <div><strong>Screen {operation.ordinal}</strong><span>{statusLabel(operation.status)}</span></div>
-                  <small>
-                    {operation.width && operation.height ? `${operation.width} × ${operation.height} · ` : ''}
-                    {formatTimestamp(operation.startedAt)} → {formatTimestamp(operation.completedAt)} · {formatDuration(operation.durationMs)}
-                  </small>
-                  {operation.requestId && <code>Request {operation.requestId}</code>}
-                  {operation.responseId && <code>Response {operation.responseId}</code>}
-                  {operation.usage && (
-                    <small>
-                      Usage {operation.usage.inputTokens} input · {operation.usage.outputTokens} output · {operation.usage.totalTokens} total
-                    </small>
-                  )}
-                </li>
-              ))}
-            </ol>
-          </section>
-
-          {run.attemptHistory.length > 0 && (
-            <section className={styles['inspector-section']} aria-label="Prior generation attempts">
-              <h3>Prior generation attempts</h3>
+            <section className={styles['inspector-section']} aria-label="Image operations">
+              <h3>Image operations</h3>
               <ol className={styles['operation-list']}>
-                {run.attemptHistory.map((attempt, index) => (
-                  <li key={`${attempt.completedAt ?? 'attempt'}-${index}`}>
-                    <div><strong>Attempt {index + 1}</strong><span>{statusLabel(attempt.status)}</span></div>
-                    <small>{formatDuration(attempt.durationMs)} · {attempt.operations.length} recorded operations</small>
-                    {attempt.error && <code>{attempt.error.code}: {attempt.error.message}</code>}
-                    {attempt.operations.map((operation) => (
-                      <small key={`${index}-${operation.ordinal}`}>
-                        Screen {operation.ordinal} · {statusLabel(operation.status)}
-                        {operation.requestId ? ` · ${operation.requestId}` : ''}
-                        {operation.usage ? ` · ${operation.usage.totalTokens} tokens` : ''}
+                {run.operations.map((operation) => (
+                  <li key={operation.ordinal}>
+                    <div><strong>Screen {operation.ordinal}</strong><span>{statusLabel(operation.status)}</span></div>
+                    <small>
+                      {operation.width && operation.height ? `${operation.width} × ${operation.height} · ` : ''}
+                      {formatTimestamp(operation.startedAt)} → {formatTimestamp(operation.completedAt)} · {formatDuration(operation.durationMs)}
+                    </small>
+                    {operation.requestId && <code>Request {operation.requestId}</code>}
+                    {operation.responseId && <code>Response {operation.responseId}</code>}
+                    {operation.usage && (
+                      <small>
+                        Usage {operation.usage.inputTokens} input · {operation.usage.outputTokens} output · {operation.usage.totalTokens} total
                       </small>
-                    ))}
+                    )}
                   </li>
                 ))}
               </ol>
             </section>
-          )}
 
-          {run.usage && (
-            <section className={styles['inspector-section']} aria-label="Token usage">
-              <h3>Usage</h3>
-              <dl className={styles['usage-grid']}>
-                <div><dt>Input tokens</dt><dd>{run.usage.inputTokens}</dd></div>
-                <div><dt>Output tokens</dt><dd>{run.usage.outputTokens}</dd></div>
-                <div><dt>Total</dt><dd>{run.usage.totalTokens}</dd></div>
-              </dl>
-            </section>
-          )}
+            {run.attemptHistory.length > 0 && (
+              <section className={styles['inspector-section']} aria-label="Prior generation attempts">
+                <h3>Prior generation attempts</h3>
+                <ol className={styles['operation-list']}>
+                  {run.attemptHistory.map((attempt, index) => (
+                    <li key={`${attempt.completedAt ?? 'attempt'}-${index}`}>
+                      <div><strong>Attempt {index + 1}</strong><span>{statusLabel(attempt.status)}</span></div>
+                      <small>{formatDuration(attempt.durationMs)} · {attempt.operations.length} recorded operations</small>
+                      {attempt.error && <code>{attempt.error.code}: {attempt.error.message}</code>}
+                      {attempt.operations.map((operation) => (
+                        <small key={`${index}-${operation.ordinal}`}>
+                          Screen {operation.ordinal} · {statusLabel(operation.status)}
+                          {operation.requestId ? ` · ${operation.requestId}` : ''}
+                          {operation.usage ? ` · ${operation.usage.totalTokens} tokens` : ''}
+                        </small>
+                      ))}
+                    </li>
+                  ))}
+                </ol>
+              </section>
+            )}
 
-          {run.validation?.warnings.map((warning) => (
-            <div className={styles['sanity-warning']} key={warning.code}>
-              <strong>Sanity Warning</strong><span>{warning.message}</span>
-            </div>
-          ))}
-          {run.error && (
-            <div className={styles['run-error']} role="alert">
-              <strong>{run.error.code}</strong><span>{run.error.message}</span>
-            </div>
-          )}
-          <details className={styles['inspector-details']}>
-            <summary>Assembled request</summary><pre>{run.assembledRequest}</pre>
-          </details>
-          <details className={styles['inspector-details']}>
-            <summary>Prompt snapshot</summary><pre>{run.stagePrompt}</pre>
+            {run.usage && (
+              <section className={styles['inspector-section']} aria-label="Token usage">
+                <h3>Usage</h3>
+                <dl className={styles['usage-grid']}>
+                  <div><dt>Input tokens</dt><dd>{run.usage.inputTokens}</dd></div>
+                  <div><dt>Output tokens</dt><dd>{run.usage.outputTokens}</dd></div>
+                  <div><dt>Total</dt><dd>{run.usage.totalTokens}</dd></div>
+                </dl>
+              </section>
+            )}
+
+            {run.validation?.warnings.map((warning) => (
+              <div className={styles['sanity-warning']} key={warning.code}>
+                <strong>Sanity Warning</strong><span>{warning.message}</span>
+              </div>
+            ))}
+            {run.error && (
+              <div className={styles['run-error']} role="alert">
+                <strong>{run.error.code}</strong><span>{run.error.message}</span>
+              </div>
+            )}
+            <details className={styles['inspector-details']}>
+              <summary>Assembled request</summary><pre>{run.assembledRequest}</pre>
+            </details>
+            <details className={styles['inspector-details']}>
+              <summary>Prompt snapshot</summary><pre>{run.stagePrompt}</pre>
+            </details>
           </details>
         </>
       ) : !generating ? (

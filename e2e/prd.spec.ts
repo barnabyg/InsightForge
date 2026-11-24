@@ -28,7 +28,11 @@ test('Author generates and inspects a persisted PRD from the Design Brief and Co
   await expect(artifact).toContainText('FR-001');
   await expect(artifact.getByRole('button', { name: 'Download .md' })).toBeVisible();
 
+  await page.setViewportSize({ width: 390, height: 844 });
   const inspector = page.getByRole('complementary', { name: 'Run Inspector' });
+  const documentBox = await page.getByRole('article', { name: 'PRD Artifact' }).boundingBox();
+  expect(documentBox!.y).toBeLessThan((await inspector.boundingBox())!.y);
+  await inspector.getByText(/Run details/).click();
   await expect(inspector).toContainText('Succeeded');
   await expect(inspector).toContainText('gpt-5.6-luna');
   await expect(inspector).toContainText('3 Concept Screens');
