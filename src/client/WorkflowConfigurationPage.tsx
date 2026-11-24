@@ -62,6 +62,7 @@ function StageEditor({
   const [feedback, setFeedback] = useState<DraftFeedback>(
     stage.draftPrompt ? 'draft_saved' : 'active',
   );
+  const [publishing, setPublishing] = useState(false);
   const [search, setSearch] = useState('');
   const [searchOffset, setSearchOffset] = useState(0);
   const [previewOpen, setPreviewOpen] = useState(false);
@@ -200,6 +201,7 @@ function StageEditor({
           <label className={styles['prompt-textarea-label']}>
             <span className={styles['visually-hidden']}>{stage.name} Stage Prompt</span>
             <textarea
+              disabled={publishing}
               ref={editor}
               aria-label={`${stage.name} Stage Prompt`}
               value={prompt}
@@ -221,7 +223,7 @@ function StageEditor({
             <p className={styles.eyebrow}>OpenAI model</p>
             <label className={styles['select-label']}>
               Model for {stage.name}
-              <select onBlur={() => void persistLatestDraft().catch(() => undefined)} value={model} onChange={(event) => editDraft({ model: event.target.value })}>
+              <select disabled={publishing} onBlur={() => void persistLatestDraft().catch(() => undefined)} value={model} onChange={(event) => editDraft({ model: event.target.value })}>
                 {modelOptions.map((option) => <option key={option}>{option}</option>)}
               </select>
             </label>
@@ -230,6 +232,7 @@ function StageEditor({
                 Image quality
                 <select
                   onBlur={() => void persistLatestDraft().catch(() => undefined)}
+                  disabled={publishing}
                   aria-label="Image quality"
                   value={imageQuality ?? 'medium'}
                   onChange={(event) => editDraft({ imageQuality: event.target.value as ImageQuality })}
@@ -285,12 +288,12 @@ function StageEditor({
       )}
 
       <footer className={styles['studio-actions']}>
-        <button className={styles['text-action']} type="button" onClick={() => setResetOpen(true)}>Reset this stage</button>
+        <button className={styles['text-action']} type="button" disabled={publishing} onClick={() => setResetOpen(true)}>Reset this stage</button>
         <div>
           <button
             className={styles['secondary-action']}
             type="button"
-            disabled={!stage.draftPrompt && !changed}
+            disabled={publishing || (!stage.draftPrompt && !changed)}
             onClick={() => void (async () => {
               try {
                 await persistLatestDraft();
@@ -307,18 +310,21 @@ function StageEditor({
           <button
             className={styles['primary-action']}
             type="button"
-            disabled={!changed || !prompt.trim()}
+            disabled={publishing || !changed || !prompt.trim()}
             onClick={() => void (async () => {
+              setPublishing(true);
               try {
                 await persistLatestDraft();
-                await onSave(stage.id, { prompt, model, imageQuality });
-                persisted.current = latest.current;
+                await onSave(stage.id, draft);
+                persisted.current = draft;
                 setFeedback('active_saved');
               } catch {
                 setFeedback('error');
+              } finally {
+                setPublishing(false);
               }
             })()}
-          >Save globally</button>
+          >{publishing ? 'Saving globally…' : 'Save globally'}</button>
         </div>
       </footer>
 
