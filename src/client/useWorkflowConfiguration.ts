@@ -44,31 +44,36 @@ export function useWorkflowConfiguration(): WorkflowConfigurationController {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [loadAttempt, setLoadAttempt] = useState(0);
-  const [loadError, setLoadError] = useState<string | null>(null);
+  const [configurationAttempt, setConfigurationAttempt] = useState(0);
+  const [catalogAttempt, setCatalogAttempt] = useState(0);
+  const [configurationFailed, setConfigurationFailed] = useState(false);
+  const [catalogFailed, setCatalogFailed] = useState(false);
+
   useEffect(() => {
     let active = true;
-    async function load() {
-      setLoading(true);
-      setLoadError(null);
-      const [settings, catalog] = await Promise.allSettled([
-        requestJson<WorkflowConfiguration>('/api/workflow-configuration'),
-        requestJson<ModelCatalog>('/api/models'),
-      ]);
-      if (!active) return;
-      const failed: string[] = [];
-      if (settings.status === 'fulfilled') setConfiguration(settings.value);
-      else failed.push('shared configuration');
-      if (catalog.status === 'fulfilled') setModels(catalog.value);
-      else failed.push('model catalog');
-      if (failed.length) setLoadError(`Could not load the ${failed.join(' and ')}.`);
-      setLoading(false);
-    }
-    void load();
-    return () => {
-      active = false;
-    };
-  }, [loadAttempt]);
+    setLoading(true);
+    setConfigurationFailed(false);
+    void requestJson<WorkflowConfiguration>('/api/workflow-configuration')
+      .then(value => { if (active) setConfiguration(value); })
+      .catch(() => { if (active) setConfigurationFailed(true); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [configurationAttempt]);
+
+  useEffect(() => {
+    let active = true;
+    setCatalogFailed(false);
+    void requestJson<ModelCatalog>('/api/models')
+      .then(value => { if (active) setModels(value); })
+      .catch(() => { if (active) setCatalogFailed(true); });
+    return () => { active = false; };
+  }, [catalogAttempt]);
+
+  const failedResources = [
+    configurationFailed && 'shared configuration',
+    catalogFailed && 'model catalog',
+  ].filter(Boolean);
+  const loadError = failedResources.length ? `Could not load the ${failedResources.join(' and ')}.` : null;
 
   const run = useCallback(async <T,>(operation: () => Promise<T>): Promise<T> => {
     setError(null);
@@ -163,7 +168,10 @@ export function useWorkflowConfiguration(): WorkflowConfigurationController {
   return {
     configuration,
     loadError,
-    retryLoad: () => setLoadAttempt(attempt => attempt + 1),
+    retryLoad() {
+      if (configurationFailed) setConfigurationAttempt(attempt => attempt + 1);
+      if (catalogFailed) setCatalogAttempt(attempt => attempt + 1);
+    },
     models,
     loading,
     error,
