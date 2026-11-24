@@ -129,7 +129,7 @@ test('Author resumes a failed Candidate Workflow without regenerating completed 
     hasText: 'Candidate generation failed',
   })).toContainText('2 of 5 operations complete', { timeout: 15_000 });
   await expect(page.getByRole('button', { name: /Design Brief/ })).not.toContainText('Current');
-  await page.getByRole('button', { name: 'Resume Candidate Workflow' }).click();
+  await page.getByRole('button', { name: 'Resume from screen 2' }).click();
   await expect(page.getByRole('status', { name: 'Generating complete workflow' })).toBeVisible();
   await expect(page.getByRole('status', { name: 'Generating complete workflow' }))
     .toHaveCount(0, { timeout: 15_000 });
@@ -216,7 +216,7 @@ test('Author completes an Insight Revision without exposing mixed workflow state
   await expect(page.getByRole('article', { name: 'Design Brief Artifact' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Insight Source' }).click();
-  await page.getByRole('button', { name: 'Resume Candidate Workflow' }).click();
+  await page.getByRole('button', { name: 'Resume from screen 2' }).click();
   await expect(page.getByRole('status', { name: 'Generating complete workflow' }))
     .toHaveCount(0, { timeout: 15_000 });
   await expect(page.getByRole('textbox', { name: 'Insight Source' }))

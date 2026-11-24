@@ -138,6 +138,11 @@ test('catalog failure preserves saved settings and offers recovery', async ({ pa
   await page.goto('/?view=prompts');
   await expect(page.getByRole('alert')).toContainText('model catalog');
   await expect(page.getByRole('textbox', { name: 'Design Brief Stage Prompt' })).toBeVisible();
+  const first = page.getByRole('tab', { name: /Design Brief/ });
+  await first.focus();
+  await first.press('ArrowRight');
+  await expect(page.getByRole('tab', { name: /Concept Screens/ })).toBeFocused();
+  await expect(page.getByRole('tabpanel')).toHaveAccessibleName(/Concept Screens/);
   await page.unroute('**/api/models');
   await page.getByRole('button', { name: 'Retry' }).click();
   await expect(page.getByText('Mock model catalog')).toBeVisible();

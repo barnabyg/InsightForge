@@ -445,6 +445,24 @@ export function WorkflowConfigurationPage() {
         {controller.configuration.stages.map((candidate, index) => (
           <button
             role="tab"
+            id={`tab-${candidate.id}`}
+            aria-controls={`panel-${candidate.id}`}
+            tabIndex={candidate.id === selectedStage ? 0 : -1}
+            onKeyDown={event => {
+              const stages = controller.configuration!.stages;
+              const last = stages.length - 1;
+              const target = {
+                ArrowRight: (index + 1) % stages.length,
+                ArrowLeft: (index + last) % stages.length,
+                Home: 0,
+                End: last,
+              }[event.key];
+              if (target === undefined) return;
+              event.preventDefault();
+              const next = stages[target]!.id;
+              setSelectedStage(next);
+              document.getElementById(`tab-${next}`)?.focus();
+            }}
             aria-selected={candidate.id === selectedStage}
             type="button"
             key={candidate.id}
@@ -457,6 +475,7 @@ export function WorkflowConfigurationPage() {
         ))}
       </div>
 
+      <div role="tabpanel" id={`panel-${stage.id}`} aria-labelledby={`tab-${stage.id}`}>
       <StageEditor
         key={stage.id}
         stage={stage}
@@ -466,6 +485,7 @@ export function WorkflowConfigurationPage() {
         onSave={controller.saveStage}
         onReset={controller.resetStage}
       />
+      </div>
 
       {pendingImport && (
         <Modal

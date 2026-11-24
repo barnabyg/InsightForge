@@ -345,7 +345,10 @@ export function ProjectWorkspace({
   );
   const affectedStage = (stageId: GeneratedStageId) =>
     rerunPlan?.affectedStages.includes(stageId) ?? false;
-  const designBriefState = workflow.generating
+  const activeStage = workflow.generatingStage === 'full_generation'
+    ? workflow.fullGenerationProgress?.currentStage ?? workflow.workflow?.candidate?.currentStage
+    : workflow.generatingStage;
+  const designBriefState = activeStage === 'design_brief'
     ? 'Generating'
     : rerunPlan?.earliestChangedStage === 'design_brief'
       ? 'Update Available'
@@ -354,7 +357,7 @@ export function ProjectWorkspace({
       : insight.trim()
         ? 'Ready'
         : 'Waiting';
-  const conceptScreenState = workflow.generatingStage === 'concept_screens'
+  const conceptScreenState = activeStage === 'concept_screens'
     ? 'Generating'
     : rerunPlan?.earliestChangedStage === 'concept_screens'
       ? 'Update Available'
@@ -365,7 +368,7 @@ export function ProjectWorkspace({
       : workflow.workflow?.designBrief
         ? 'Ready'
         : 'Waiting';
-  const prdState = workflow.generatingStage === 'prd'
+  const prdState = activeStage === 'prd'
     ? 'Generating'
     : rerunPlan?.earliestChangedStage === 'prd'
       ? 'Update Available'
@@ -572,25 +575,29 @@ export function ProjectWorkspace({
         </a>
         <ol>
           <li className={selectedStage === 'insight_source' ? styles['stage-rail-active'] : ''}>
-            <button type="button" onClick={() => void selectStage('insight_source')}>
+            <button type="button" aria-current={selectedStage === 'insight_source' ? 'step' : undefined}
+              onClick={() => void selectStage('insight_source')}>
               <span className={styles['rail-number']}>01</span>
               <span><strong>Insight Source</strong><small>Current</small></span>
             </button>
           </li>
           <li className={selectedStage === 'design_brief' ? styles['stage-rail-active'] : ''}>
-            <button type="button" onClick={() => void selectStage('design_brief')}>
+            <button type="button" aria-current={selectedStage === 'design_brief' ? 'step' : undefined}
+              onClick={() => void selectStage('design_brief')}>
               <span className={styles['rail-number']}>02</span>
               <span><strong>Design Brief</strong><small>{designBriefState}</small></span>
             </button>
           </li>
           <li className={selectedStage === 'concept_screens' ? styles['stage-rail-active'] : ''}>
-            <button type="button" onClick={() => void selectStage('concept_screens')}>
+            <button type="button" aria-current={selectedStage === 'concept_screens' ? 'step' : undefined}
+              onClick={() => void selectStage('concept_screens')}>
               <span className={styles['rail-number']}>03</span>
               <span><strong>Concept Screens</strong><small>{conceptScreenState}</small></span>
             </button>
           </li>
           <li className={selectedStage === 'prd' ? styles['stage-rail-active'] : ''}>
-            <button type="button" onClick={() => void selectStage('prd')}>
+            <button type="button" aria-current={selectedStage === 'prd' ? 'step' : undefined}
+              onClick={() => void selectStage('prd')}>
               <span className={styles['rail-number']}>04</span>
               <span><strong>PRD</strong><small>{prdState}</small></span>
             </button>
@@ -773,7 +780,9 @@ export function ProjectWorkspace({
                     onClick={() => {
                       void candidatePrimaryAction?.().catch(() => undefined);
                     }}
-                  >{candidatePresentation?.primaryActionLabel}</button>
+                  >{candidatePresentation?.primaryAction === 'resume' && candidate.currentStage === 'concept_screens'
+                      ? `Resume from screen ${Math.max(1, Math.min(3, candidate.completedOperationCount))}`
+                      : candidatePresentation?.primaryActionLabel}</button>
                   {candidatePresentation?.canKeep && (
                     <button className={styles['secondary-action']} type="button" onClick={() => {
                       void workflow.keepCandidateAfterWarningReview().catch(() => undefined);
@@ -844,7 +853,7 @@ export function ProjectWorkspace({
                   ) || (hasCurrentArtifact('design_brief') && !rerunPlan)}
                   onClick={() => requestRegeneration('design_brief')}
                 >
-                  {workflow.generating
+                  {activeStage === 'design_brief'
                     ? 'Generating…'
                     : rerunPlan || hasCurrentArtifact('design_brief')
                       ? completeWorkflowActionLabel('design_brief')

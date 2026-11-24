@@ -686,7 +686,7 @@ a {
   min-height: 72px;
   padding: 0;
   border-bottom: 1px solid var(--line);
-  opacity: 0.53;
+  opacity: 1;
 }
 
 .stage-rail li button {
@@ -2911,6 +2911,12 @@ a {
   .empty-state {
     align-items: flex-start;
   }
+}
+
+@media (max-width: 360px) {
+  .topbar { padding-inline: 10px; }
+  .last-check { display: none; }
+  .full-generation-heading { flex-wrap: wrap; }
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -22,6 +22,9 @@ test('Author generates and inspects a persisted coordinated Concept Screen Set',
   await page.getByRole('button', { name: 'Generate Concept Screens' }).click();
   await expect(page.getByRole('status', { name: 'Generating Concept Screens' })).toBeVisible();
   await expect(page.getByText(/Screen [1-3] of 3/)).toBeVisible();
+  const rail = page.getByRole('complementary', { name: 'Project stages' });
+  await expect(rail.getByRole('button', { name: /Design Brief/ })).toContainText('Current');
+  await expect(rail.getByRole('button', { name: /Concept Screens/ })).toHaveAttribute('aria-current', 'step');
 
   const gallery = page.getByRole('article', { name: 'Concept Screen Set' });
   await expect(gallery).toBeVisible();
