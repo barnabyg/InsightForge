@@ -2475,7 +2475,9 @@ a {
   white-space: nowrap;
 }
 
+.modal-wide { width: min(1200px, calc(100% - 24px)); }
 .concept-focus-image {
+  margin-inline: auto;
   max-width: none;
   height: auto;
   display: block;
@@ -2488,6 +2490,7 @@ a {
 }
 
 .concept-focus-toolbar {
+  flex-wrap: wrap;
   margin-bottom: 10px;
   display: flex;
   align-items: center;
@@ -2495,11 +2498,12 @@ a {
 }
 
 .concept-focus-toolbar button {
+  min-height: 32px;
   padding: 6px 9px;
   border: 1px solid var(--line-strong);
   background: #fff;
   color: var(--ink);
-  font-size: 9px;
+  font-size: 13px;
 }
 
 .concept-focus-toolbar button:disabled {

@@ -42,8 +42,16 @@ test('Author generates and inspects a persisted coordinated Concept Screen Set',
   await expect(focus.getByText('100%')).toBeVisible();
   await focus.getByRole('button', { name: 'Zoom in' }).click();
   await expect(focus.getByText('125%')).toBeVisible();
-  await focus.getByRole('button', { name: 'Reset zoom' }).click();
+  await focus.getByRole('button', { name: 'Actual size' }).click();
   await expect(focus.getByText('100%')).toBeVisible();
+  expect((await focus.getByRole('img').boundingBox())!.width).toBe(1024);
+  await page.setViewportSize({ width: 390, height: 844 });
+  await focus.getByRole('button', { name: 'Fit', exact: true }).click();
+  expect((await focus.getByRole('img').boundingBox())!.width).toBeLessThan(390);
+  await focus.getByRole('button', { name: 'Next screen' }).click();
+  const second = page.getByRole('dialog', { name: 'Concept Screen 2' });
+  await expect(second.getByRole('img', { name: 'Concept Screen 2' })).toBeVisible();
+  await second.getByRole('button', { name: 'Previous screen' }).click();
   await focus.getByRole('button', { name: 'Close' }).click();
 
   await page.getByRole('button', { name: /Design Brief/ }).click();

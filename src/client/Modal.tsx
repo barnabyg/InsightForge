@@ -3,12 +3,13 @@ import styles from './App.module.css';
 
 interface ModalProps {
   title: string;
+  wide?: boolean;
   children: ReactNode;
   actions: ReactNode;
   onDismiss(): void;
 }
 
-export function Modal({ title, children, actions, onDismiss }: ModalProps) {
+export function Modal({ title, wide, children, actions, onDismiss }: ModalProps) {
   const modal = useRef<HTMLDialogElement>(null);
   const titleId = useId();
 
@@ -25,7 +26,7 @@ export function Modal({ title, children, actions, onDismiss }: ModalProps) {
   return (
     <dialog
       ref={modal}
-      className={styles.modal}
+      className={wide ? `${styles.modal} ${styles['modal-wide']}` : styles.modal}
       aria-labelledby={titleId}
       onCancel={event => { event.preventDefault(); onDismiss(); }}
       onClick={event => {
